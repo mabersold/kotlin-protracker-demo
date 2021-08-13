@@ -3,7 +3,6 @@ import model.Pattern
 import model.ProTrackerModule
 import model.Row
 import model.Sample
-import java.io.File
 import java.nio.ByteBuffer
 import kotlin.experimental.and
 
