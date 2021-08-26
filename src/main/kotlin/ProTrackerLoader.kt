@@ -16,8 +16,8 @@ class ProTrackerLoader {
 
     private lateinit var loadingBuffer: ByteBuffer
 
-    fun loadModule(): ProTrackerModule {
-        prepareBuffer()
+    fun loadModule(fileName: String): ProTrackerModule {
+        prepareBuffer(fileName)
 
         val songTitle = getString(TITLE_LENGTH)
         val samples = arrayListOf<Sample>()
@@ -84,8 +84,8 @@ class ProTrackerLoader {
         return Sample(sampleName, sampleLength, fineTune, volume, repeatOffsetStart, repeatLength)
     }
 
-    private fun prepareBuffer() {
-        val fileBytes = javaClass.classLoader.getResourceAsStream("space_debris.mod")!!.readBytes()
+    private fun prepareBuffer(fileName: String) {
+        val fileBytes = javaClass.classLoader.getResourceAsStream(fileName)!!.readBytes()
         loadingBuffer = ByteBuffer.allocate(fileBytes.size)
         loadingBuffer.put(fileBytes)
         loadingBuffer.rewind()
