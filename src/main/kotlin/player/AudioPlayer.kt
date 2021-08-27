@@ -11,11 +11,16 @@ class AudioPlayer {
         audioLine.open()
     }
 
-    fun playAudio(audioData: ByteArray) {
+    fun prepareAudioLine() {
         audioLine.start()
+    }
 
-        audioLine.write(audioData, 0, audioData.size)
-
+    fun destroyAudioLine() {
         audioLine.drain()
+        audioLine.close()
+    }
+
+    fun playAudio(audioData: ByteArray) {
+        audioLine.write(audioData, 0, audioData.size)
     }
 }
