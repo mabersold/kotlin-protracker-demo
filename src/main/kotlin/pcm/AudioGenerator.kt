@@ -6,26 +6,29 @@ import java.nio.ByteBuffer
 import kotlin.math.floor
 
 class AudioGenerator(private val module: ProTrackerModule) {
-    private var ticksPerRow = 6
-    private var beatsPerMinute = 125
+    //these will eventually need to be vars since they can be modified by effects, but they can be vals for now
+    private val ticksPerRow = 6
+    private val beatsPerMinute = 125
+
+    //Song progress state data
     private var currentTickPosition = 0
     private var currentRowPosition = 0
     private var currentSamplePosition = 0
 
-    private var activeSampleNumber = 0
-
-    //Current state information
+    //Active note state data
     private var isInstrumentCurrentlyPlaying = false
-    private lateinit var activeRow: Row
-    //todo: There is no active period if instrument is not playing
+    private var activeRow: Row
     //The period (aka note) can be modified by effects, so it should be tracked separately from the active row
     private var activePeriod = 0
-
-    //Starting at 2, because the first two bytes are loop data
-    //todo: Reset currentSamplePositionOfInstrument when a new note command is issued
+    //This starts at 2 because the first two bytes of audio data are looping info
     private var currentSamplePositionOfInstrument = 2
     private var samplesSinceSampleChanged = 0
     private var sampleProgressCounter = 0.0
+    private var activeSampleNumber = 0
+
+    //Resampling state data
+    private var iterationsUntilNextSample = 0
+    private var samplesPerSecond = 0.0
 
     companion object {
         private const val SAMPLING_RATE = 44100.0
@@ -38,6 +41,9 @@ class AudioGenerator(private val module: ProTrackerModule) {
         if (activeRow.period != 0) {
             isInstrumentCurrentlyPlaying = true
             activePeriod = activeRow.period
+
+            samplesPerSecond = PAL_CLOCK_RATE / (activePeriod * 2)
+            iterationsUntilNextSample = getIterationsUntilNextSample(SAMPLING_RATE, samplesPerSecond, sampleProgressCounter)
         }
     }
 
@@ -49,10 +55,54 @@ class AudioGenerator(private val module: ProTrackerModule) {
         return currentRowPosition < 64
     }
 
+    /**
+     * Retrieves the next sample in the song
+     */
     fun generateNextSample(): Byte {
-        //get the sample data
         val sample = getNextSample(activePeriod, module.samples[0].sampleData!!)
+        updateSongPosition()
+        return sample
+    }
 
+    /**
+     * Retrieves the next sample with the given period (note) and audio data
+     */
+    private fun getNextSample(period: Int, audioData: ByteArray): Byte {
+        if (!isInstrumentCurrentlyPlaying) {
+            return 0
+        }
+
+        //we need the current sample and the next sample to properly interpolate
+        val currentSample = audioData[currentSamplePositionOfInstrument]
+        val nextSample = if(currentSamplePositionOfInstrument + 1 == audioData.size) 0 else audioData[currentSamplePositionOfInstrument + 1]
+
+        val rise = (nextSample - currentSample).toDouble()
+        val slope = rise / iterationsUntilNextSample
+
+        val actualSample = ((slope * samplesSinceSampleChanged).toInt() + currentSample).toByte()
+        updateResamplingPosition(audioData.size, period)
+
+        return actualSample
+    }
+
+    private fun getIterationsUntilNextSample(samplingRate: Double, samplesPerSecond: Double, counter: Double): Int {
+        val iterationsPerSample = floor(SAMPLING_RATE / samplesPerSecond).toInt()
+        val maximumCounterValueForExtraIteration = (samplingRate - (samplesPerSecond * iterationsPerSample))
+
+        return iterationsPerSample + additionalIteration(counter, maximumCounterValueForExtraIteration)
+    }
+
+    private fun additionalIteration(counter: Double, maximumCounterValueForExtraIteration: Double): Int =
+        if (counter < maximumCounterValueForExtraIteration) 1 else 0
+
+    private fun getSamplesPerTick(): Double {
+        val beatsPerSecond = beatsPerMinute.toDouble() / 60.0
+        val samplesPerBeat = SAMPLING_RATE / beatsPerSecond
+        val samplesPerRow = samplesPerBeat / 4
+        return samplesPerRow / ticksPerRow
+    }
+
+    private fun updateSongPosition() {
         //Update our progress in the song
         currentSamplePosition++
         if (currentSamplePosition >= getSamplesPerTick()) {
@@ -68,53 +118,32 @@ class AudioGenerator(private val module: ProTrackerModule) {
             if (currentRowPosition < 64) {
                 activeRow = module.patterns[0].channels[0].rows[currentRowPosition]
                 if (activeRow.period != 0) {
-                    //Yes, there is a new note command
                     isInstrumentCurrentlyPlaying = true
                     activePeriod = activeRow.period
                     currentSamplePositionOfInstrument = 2
                 }
             }
         }
-
-        return sample
     }
 
-    private fun getNextSample(period: Int, audioData: ByteArray): Byte {
-        if (!isInstrumentCurrentlyPlaying) {
-            return 0
-        }
-
-        val samplesPerSecond = PAL_CLOCK_RATE / (period * 2)
-        //todo: I'm pretty sure this does not need to be calculated every single iteration
-        val totalIterationsUntilNextSample = getIterationsUntilNextSample(SAMPLING_RATE, samplesPerSecond, sampleProgressCounter).toDouble()
-
-        //get the current sample from the audio data
-        val currentSample = audioData[currentSamplePositionOfInstrument]
-        //get the next sample from the audio data
-        val nextSample = if(currentSamplePositionOfInstrument + 1 == audioData.size) 0 else audioData[currentSamplePositionOfInstrument + 1]
-
-        val rise = (nextSample - currentSample).toDouble()
-        val slope = rise / totalIterationsUntilNextSample
-
-        val actualSample = ((slope * samplesSinceSampleChanged).toInt() + currentSample).toByte()
-
-        //Adjust all the values if needed
+    private fun updateResamplingPosition(sizeOfAudioData: Int, period: Int) {
         sampleProgressCounter += samplesPerSecond
         samplesSinceSampleChanged++
         if (sampleProgressCounter > SAMPLING_RATE) {
             sampleProgressCounter -= SAMPLING_RATE
             currentSamplePositionOfInstrument++
-            if (isInstrumentCurrentlyPlaying && currentSamplePositionOfInstrument > audioData.size) {
+            if (isInstrumentCurrentlyPlaying && currentSamplePositionOfInstrument >= sizeOfAudioData) {
                 isInstrumentCurrentlyPlaying = false
+                activePeriod = 0
             }
 
+            //recalculate all resampling data here
+            samplesPerSecond = PAL_CLOCK_RATE / (period * 2)
+            iterationsUntilNextSample = getIterationsUntilNextSample(SAMPLING_RATE, samplesPerSecond, sampleProgressCounter)
             samplesSinceSampleChanged = 0
         }
-
-        return actualSample
     }
 
-    //todo: calculate how much I need to allocate
     fun resample(audioData: ByteArray, period: Int): ByteArray {
         val samplesPerSecond = PAL_CLOCK_RATE / (period * 2)
         val returnBuffer = ByteBuffer.allocate(60000)
@@ -125,7 +154,6 @@ class AudioGenerator(private val module: ProTrackerModule) {
         var audioDataIndex = 2
 
         var iterationsSinceSampleChanged = 0
-//        var incrementerIShouldDelete = 0
         while (audioDataIndex < audioData.size) {
             val totalIterationsUntilNextSample = getIterationsUntilNextSample(SAMPLING_RATE, samplesPerSecond, counter)
 
@@ -144,26 +172,8 @@ class AudioGenerator(private val module: ProTrackerModule) {
                 audioDataIndex++
                 iterationsSinceSampleChanged = 0
             }
-//            println(incrementerIShouldDelete++)
         }
 
         return returnBuffer.array()
-    }
-
-    private fun getIterationsUntilNextSample(samplingRate: Double, samplesPerSecond: Double, counter: Double): Int {
-        val iterationsPerSample = floor(SAMPLING_RATE / samplesPerSecond).toInt()
-        val maximumCounterValueForExtraIteration = (samplingRate - (samplesPerSecond * iterationsPerSample))
-
-        return iterationsPerSample + additionalIteration(counter, maximumCounterValueForExtraIteration)
-    }
-
-    private fun additionalIteration(counter: Double, maximumCounterValueForExtraIteration: Double): Int =
-        if (counter < maximumCounterValueForExtraIteration) 1 else 0
-
-    private fun getSamplesPerTick(): Double {
-        val beatsPerSecond = beatsPerMinute.toDouble() / 60.0
-        val samplesPerBeat = SAMPLING_RATE / beatsPerSecond
-        val samplesPerRow = samplesPerBeat / 4
-        return samplesPerRow / ticksPerRow
     }
 }
