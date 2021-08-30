@@ -6,3 +6,4 @@ build
 .project
 bin
 .vscode
+.settings

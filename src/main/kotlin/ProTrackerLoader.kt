@@ -60,7 +60,7 @@ class ProTrackerLoader {
             }
         }
 
-        return ProTrackerModule(songTitle, patterns, samples, numberOfSongPositions, noiseTrackerRestartPosition, identifier)
+        return ProTrackerModule(songTitle, orderList, patterns, samples, numberOfSongPositions, noiseTrackerRestartPosition, identifier)
     }
 
     private fun getString(length: Int): String {

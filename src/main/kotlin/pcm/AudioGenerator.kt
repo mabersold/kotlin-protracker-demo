@@ -9,11 +9,13 @@ class AudioGenerator(private val module: ProTrackerModule) {
     //these will eventually need to be vars since they can be modified by effects, but they can be vals for now
     private val ticksPerRow = 6
     private val beatsPerMinute = 125
+    private val orderList = module.orderList.subList(0, module.numberOfSongPositions.toInt())
 
     //Song progress state data
     private var currentTickPosition = 0
     private var currentRowPosition = 0
     private var currentSamplePosition = 0
+    private var currentOrderListPosition = 0
 
     //Active note state data
     private var isInstrumentCurrentlyPlaying = false
@@ -37,7 +39,7 @@ class AudioGenerator(private val module: ProTrackerModule) {
 
     init {
         //get the first note - set isInstrumentCurrentlyPlaying and activePeriod
-        activeRow = module.patterns[0].channels[0].rows[0]
+        activeRow = module.patterns[currentOrderListPosition].channels[0].rows[0]
         if (activeRow.period != 0) {
             isInstrumentCurrentlyPlaying = true
             activePeriod = activeRow.period
@@ -48,11 +50,7 @@ class AudioGenerator(private val module: ProTrackerModule) {
     }
 
     fun songStillActive(): Boolean {
-        //the song is still active if:
-        //  --we have not passed the final sample of the final tick of the final pattern in the order list
-
-        //todo: This should be based on the order list, not the row position
-        return currentRowPosition < 64
+        return currentOrderListPosition < orderList.size
     }
 
     /**
@@ -116,12 +114,17 @@ class AudioGenerator(private val module: ProTrackerModule) {
 
             //if we are at a new row, we need to identify if a new note command has been given
             if (currentRowPosition < 64) {
-                activeRow = module.patterns[0].channels[0].rows[currentRowPosition]
-                if (activeRow.period != 0) {
-                    isInstrumentCurrentlyPlaying = true
-                    activePeriod = activeRow.period
-                    currentSamplePositionOfInstrument = 2
-                }
+                setNewActiveRow()
+            }
+        }
+
+        //Select the next pattern in the order list, if possible
+        if (currentRowPosition >= 64) {
+            currentOrderListPosition++
+            currentRowPosition = 0
+
+            if (currentOrderListPosition < orderList.size) {
+                setNewActiveRow()
             }
         }
     }
@@ -141,6 +144,15 @@ class AudioGenerator(private val module: ProTrackerModule) {
             samplesPerSecond = PAL_CLOCK_RATE / (period * 2)
             iterationsUntilNextSample = getIterationsUntilNextSample(SAMPLING_RATE, samplesPerSecond, sampleProgressCounter)
             samplesSinceSampleChanged = 0
+        }
+    }
+
+    private fun setNewActiveRow() {
+        activeRow = module.patterns[currentOrderListPosition].channels[0].rows[currentRowPosition]
+        if (activeRow.period != 0) {
+            isInstrumentCurrentlyPlaying = true
+            activePeriod = activeRow.period
+            currentSamplePositionOfInstrument = 2
         }
     }
 
