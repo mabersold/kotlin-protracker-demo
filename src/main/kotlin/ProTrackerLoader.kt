@@ -2,28 +2,28 @@ import model.Channel
 import model.Pattern
 import model.ProTrackerModule
 import model.Row
-import model.Sample
+import model.Instrument
 import java.nio.ByteBuffer
 import kotlin.experimental.and
 
 class ProTrackerLoader {
     companion object {
         private const val TITLE_LENGTH = 20
-        private const val SAMPLE_NAME_LENGTH = 22
-        private const val NUMBER_OF_SAMPLES = 31
+        private const val INSTRUMENT_NAME_LENGTH = 22
+        private const val NUMBER_OF_INSTRUMENTS = 31
         private const val ORDER_LIST_MAX_LENGTH = 128
     }
 
     private lateinit var loadingBuffer: ByteBuffer
 
-    fun loadModule(): ProTrackerModule {
-        prepareBuffer()
+    fun loadModule(fileName: String): ProTrackerModule {
+        prepareBuffer(fileName)
 
         val songTitle = getString(TITLE_LENGTH)
-        val samples = arrayListOf<Sample>()
+        val instruments = arrayListOf<Instrument>()
 
-        repeat(NUMBER_OF_SAMPLES) {
-            samples.add(getSample())
+        repeat(NUMBER_OF_INSTRUMENTS) {
+            instruments.add(getInstrument())
         }
 
         val numberOfSongPositions = loadingBuffer.get()
@@ -53,14 +53,14 @@ class ProTrackerLoader {
             }
         }
 
-        for (sample in samples) {
-            if (sample.length > 0) {
-                sample.sampleData = ByteArray(sample.length * 2)
-                loadingBuffer.get(sample.sampleData)
+        for (instrument in instruments) {
+            if (instrument.length > 0) {
+                instrument.audioData = ByteArray(instrument.length * 2)
+                loadingBuffer.get(instrument.audioData)
             }
         }
 
-        return ProTrackerModule(songTitle, patterns, samples, numberOfSongPositions, noiseTrackerRestartPosition, identifier)
+        return ProTrackerModule(songTitle, orderList, patterns, instruments, numberOfSongPositions, noiseTrackerRestartPosition, identifier)
     }
 
     private fun getString(length: Int): String {
@@ -73,26 +73,26 @@ class ProTrackerLoader {
         return builder.toString().trimEnd(Char.MIN_VALUE)
     }
 
-    private fun getSample(): Sample {
-        val sampleName = getString(SAMPLE_NAME_LENGTH)
-        val sampleLength = loadingBuffer.short
+    private fun getInstrument(): Instrument {
+        val instrumentName = getString(INSTRUMENT_NAME_LENGTH)
+        val instrumentLength = loadingBuffer.short
         val fineTune = signedNibble(loadingBuffer.get())
         val volume = loadingBuffer.get()
         val repeatOffsetStart = loadingBuffer.short
         val repeatLength = loadingBuffer.short
 
-        return Sample(sampleName, sampleLength, fineTune, volume, repeatOffsetStart, repeatLength)
+        return Instrument(instrumentName, instrumentLength, fineTune, volume, repeatOffsetStart, repeatLength)
     }
 
-    private fun prepareBuffer() {
-        val fileBytes = javaClass.classLoader.getResourceAsStream("space_debris.mod")!!.readBytes()
+    private fun prepareBuffer(fileName: String) {
+        val fileBytes = javaClass.classLoader.getResourceAsStream(fileName)!!.readBytes()
         loadingBuffer = ByteBuffer.allocate(fileBytes.size)
         loadingBuffer.put(fileBytes)
         loadingBuffer.rewind()
     }
 
     private fun getRow(bufferData: ByteArray): Row {
-        val sampleNumber = bufferData[0].toInt().and(240) + bufferData[2].toInt().and(240).shr(4)
+        val instrumentNumber = bufferData[0].toInt().and(240) + bufferData[2].toInt().and(240).shr(4)
         val period = bufferData[0].toInt().and(15).shl(8).or(bufferData[1].toInt().and(255))
         val effect = bufferData[2].toInt().and(15).shl(8).or(bufferData[3].toInt().and(255))
 
@@ -100,7 +100,7 @@ class ProTrackerLoader {
         val xValue = effect.and(240).shr(4)
         val yValue = effect.and(15)
 
-        return Row(sampleNumber, period, effectNumber, xValue, yValue)
+        return Row(instrumentNumber, period, effectNumber, xValue, yValue)
     }
 
     private fun signedNibble(data: Byte): Byte {

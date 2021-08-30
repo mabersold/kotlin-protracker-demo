@@ -1,3 +1,9 @@
 .gradle
 .idea
 build
+.DS_Store
+.classpath
+.project
+bin
+.vscode
+.settings
