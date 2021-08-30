@@ -1,7 +1,7 @@
 package model
 
 data class Row(
-    val sample: Int,
+    val instrumentNumber: Int,
     val period: Int,
     val effectNumber: Int,
     val effectXValue: Int,

@@ -11,26 +11,9 @@ class AudioGenerator(private val module: ProTrackerModule) {
     private val beatsPerMinute = 125
     private val orderList = module.orderList.subList(0, module.numberOfSongPositions.toInt())
 
-    //Song progress state data
-    private var currentTickPosition = 0
-    private var currentRowPosition = 0
-    private var currentSamplePosition = 0
-    private var currentOrderListPosition = 0
-
-    //Active note state data
-    private var isInstrumentCurrentlyPlaying = false
-    private var activeRow: Row
-    //The period (aka note) can be modified by effects, so it should be tracked separately from the active row
-    private var activePeriod = 0
-    //This starts at 2 because the first two bytes of audio data are looping info
-    private var currentSamplePositionOfInstrument = 2
-    private var samplesSinceSampleChanged = 0
-    private var sampleProgressCounter = 0.0
-    private var activeInstrumentNumber = 0
-
-    //Resampling state data
-    private var iterationsUntilNextSample = 0
-    private var samplesPerSecond = 0.0
+    private val songPositionState: SongPositionState = SongPositionState(0, 0, 0, 0, module.orderList[0])
+    private val activeNoteState: ActiveNoteState = ActiveNoteState(false, module.patterns[songPositionState.currentPatternNumber].channels[0].rows[0], 0, 0)
+    private val resamplingState = ResamplingState(0.0, 0, 2, 0, 0.0)
 
     companion object {
         private const val SAMPLING_RATE = 44100.0
@@ -38,26 +21,25 @@ class AudioGenerator(private val module: ProTrackerModule) {
     }
 
     init {
-        //get the first note - set isInstrumentCurrentlyPlaying and activePeriod
-        activeRow = module.patterns[currentOrderListPosition].channels[0].rows[0]
-        if (activeRow.period != 0) {
-            isInstrumentCurrentlyPlaying = true
-            activePeriod = activeRow.period
+        if (activeNoteState.activeRow.period != 0) {
+            activeNoteState.isInstrumentCurrentlyPlaying = true
+            activeNoteState.activePeriod = activeNoteState.activeRow.period
+            activeNoteState.activeInstrumentNumber = activeNoteState.activeRow.instrumentNumber - 1
 
-            samplesPerSecond = PAL_CLOCK_RATE / (activePeriod * 2)
-            iterationsUntilNextSample = getIterationsUntilNextSample(SAMPLING_RATE, samplesPerSecond, sampleProgressCounter)
+            resamplingState.samplesPerSecond = PAL_CLOCK_RATE / (activeNoteState.activePeriod * 2)
+            resamplingState.iterationsUntilNextSample = getIterationsUntilNextSample(SAMPLING_RATE, resamplingState.samplesPerSecond, resamplingState.sampleProgressCounter)
         }
     }
 
     fun songStillActive(): Boolean {
-        return currentOrderListPosition < orderList.size
+        return songPositionState.currentOrderListPosition < orderList.size
     }
 
     /**
      * Retrieves the next sample in the song
      */
     fun generateNextSample(): Byte {
-        val sample = getNextSample(activePeriod, module.instruments[0].audioData!!)
+        val sample = getNextSample(activeNoteState.activePeriod, module.instruments[activeNoteState.activeInstrumentNumber].audioData!!)
         updateSongPosition()
         return sample
     }
@@ -66,18 +48,18 @@ class AudioGenerator(private val module: ProTrackerModule) {
      * Retrieves the next sample with the given period (note) and audio data
      */
     private fun getNextSample(period: Int, audioData: ByteArray): Byte {
-        if (!isInstrumentCurrentlyPlaying) {
+        if (!activeNoteState.isInstrumentCurrentlyPlaying) {
             return 0
         }
 
         //we need the current sample and the next sample to properly interpolate
-        val currentSample = audioData[currentSamplePositionOfInstrument]
-        val nextSample = if(currentSamplePositionOfInstrument + 1 == audioData.size) 0 else audioData[currentSamplePositionOfInstrument + 1]
+        val currentSample = audioData[resamplingState.currentSamplePositionOfInstrument]
+        val nextSample = if(resamplingState.currentSamplePositionOfInstrument + 1 == audioData.size) 0 else audioData[resamplingState.currentSamplePositionOfInstrument + 1]
 
         val rise = (nextSample - currentSample).toDouble()
-        val slope = rise / iterationsUntilNextSample
+        val slope = rise / resamplingState.iterationsUntilNextSample
 
-        val actualSample = ((slope * samplesSinceSampleChanged).toInt() + currentSample).toByte()
+        val actualSample = ((slope * resamplingState.samplesSinceSampleChanged).toInt() + currentSample).toByte()
         updateResamplingPosition(audioData.size, period)
 
         return actualSample
@@ -102,59 +84,84 @@ class AudioGenerator(private val module: ProTrackerModule) {
 
     private fun updateSongPosition() {
         //Update our progress in the song
-        currentSamplePosition++
-        if (currentSamplePosition >= getSamplesPerTick()) {
-            currentSamplePosition = 0
-            currentTickPosition++
+        songPositionState.currentSamplePosition++
+        if (songPositionState.currentSamplePosition >= getSamplesPerTick()) {
+            songPositionState.currentSamplePosition = 0
+            songPositionState.currentTickPosition++
         }
 
-        if (currentTickPosition >= ticksPerRow) {
-            currentTickPosition = 0
-            currentRowPosition++
+        if (songPositionState.currentTickPosition >= ticksPerRow) {
+            songPositionState.currentTickPosition = 0
+            songPositionState.currentRowPosition++
 
             //if we are at a new row, we need to identify if a new note command has been given
-            if (currentRowPosition < 64) {
-                setNewActiveRow()
+            if (songPositionState.currentRowPosition < 64) {
+                updateRow()
             }
         }
 
         //Select the next pattern in the order list, if possible
-        if (currentRowPosition >= 64) {
-            currentOrderListPosition++
-            currentRowPosition = 0
+        if (songPositionState.currentRowPosition >= 64) {
+            songPositionState.currentOrderListPosition++
+            songPositionState.currentRowPosition = 0
 
-            if (currentOrderListPosition < orderList.size) {
-                setNewActiveRow()
+            if (songPositionState.currentOrderListPosition < orderList.size) {
+                updateRow()
             }
         }
     }
 
     private fun updateResamplingPosition(sizeOfAudioData: Int, period: Int) {
-        sampleProgressCounter += samplesPerSecond
-        samplesSinceSampleChanged++
-        if (sampleProgressCounter > SAMPLING_RATE) {
-            sampleProgressCounter -= SAMPLING_RATE
-            currentSamplePositionOfInstrument++
-            if (isInstrumentCurrentlyPlaying && currentSamplePositionOfInstrument >= sizeOfAudioData) {
-                isInstrumentCurrentlyPlaying = false
-                activePeriod = 0
+        resamplingState.sampleProgressCounter += resamplingState.samplesPerSecond
+        resamplingState.samplesSinceSampleChanged++
+        if (resamplingState.sampleProgressCounter > SAMPLING_RATE) {
+            resamplingState.sampleProgressCounter -= SAMPLING_RATE
+            resamplingState.currentSamplePositionOfInstrument++
+            if (activeNoteState.isInstrumentCurrentlyPlaying && resamplingState.currentSamplePositionOfInstrument >= sizeOfAudioData) {
+                activeNoteState.isInstrumentCurrentlyPlaying = false
+                activeNoteState.activePeriod = 0
             }
 
             //recalculate all resampling data here
-            samplesPerSecond = PAL_CLOCK_RATE / (period * 2)
-            iterationsUntilNextSample = getIterationsUntilNextSample(SAMPLING_RATE, samplesPerSecond, sampleProgressCounter)
-            samplesSinceSampleChanged = 0
+            resamplingState.samplesPerSecond = PAL_CLOCK_RATE / (period * 2)
+            resamplingState.iterationsUntilNextSample = getIterationsUntilNextSample(SAMPLING_RATE, resamplingState.samplesPerSecond, resamplingState.sampleProgressCounter)
+            resamplingState.samplesSinceSampleChanged = 0
         }
     }
 
-    private fun setNewActiveRow() {
-        activeRow = module.patterns[currentOrderListPosition].channels[0].rows[currentRowPosition]
-        if (activeRow.period != 0) {
-            isInstrumentCurrentlyPlaying = true
-            activePeriod = activeRow.period
-            currentSamplePositionOfInstrument = 2
+    private fun updateRow() {
+        songPositionState.currentPatternNumber = module.orderList[songPositionState.currentOrderListPosition]
+        activeNoteState.activeRow = module.patterns[songPositionState.currentPatternNumber].channels[0].rows[songPositionState.currentRowPosition]
+        if (activeNoteState.activeRow.period != 0) {
+            activeNoteState.isInstrumentCurrentlyPlaying = true
+            activeNoteState.activePeriod = activeNoteState.activeRow.period
+            resamplingState.currentSamplePositionOfInstrument = 2
+            activeNoteState.activeInstrumentNumber = activeNoteState.activeRow.instrumentNumber - 1
         }
     }
+
+    data class SongPositionState(
+        var currentOrderListPosition: Int,
+        var currentRowPosition: Int,
+        var currentTickPosition: Int,
+        var currentSamplePosition: Int,
+        var currentPatternNumber: Int
+    )
+
+    data class ActiveNoteState(
+        var isInstrumentCurrentlyPlaying: Boolean,
+        var activeRow: Row,
+        var activePeriod: Int, //The period (aka note) can be modified by effects, so it should be tracked separately from the active row
+        var activeInstrumentNumber: Int
+    )
+
+    data class ResamplingState(
+        var samplesPerSecond: Double,
+        var iterationsUntilNextSample: Int,
+        var currentSamplePositionOfInstrument: Int,
+        var samplesSinceSampleChanged: Int,
+        var sampleProgressCounter: Double
+    )
 
     fun resample(audioData: ByteArray, period: Int): ByteArray {
         val samplesPerSecond = PAL_CLOCK_RATE / (period * 2)
