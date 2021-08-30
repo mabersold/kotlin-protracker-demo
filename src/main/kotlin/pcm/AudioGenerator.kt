@@ -26,7 +26,7 @@ class AudioGenerator(private val module: ProTrackerModule) {
     private var currentSamplePositionOfInstrument = 2
     private var samplesSinceSampleChanged = 0
     private var sampleProgressCounter = 0.0
-    private var activeSampleNumber = 0
+    private var activeInstrumentNumber = 0
 
     //Resampling state data
     private var iterationsUntilNextSample = 0
@@ -57,7 +57,7 @@ class AudioGenerator(private val module: ProTrackerModule) {
      * Retrieves the next sample in the song
      */
     fun generateNextSample(): Byte {
-        val sample = getNextSample(activePeriod, module.samples[0].sampleData!!)
+        val sample = getNextSample(activePeriod, module.instruments[0].audioData!!)
         updateSongPosition()
         return sample
     }
