@@ -3,6 +3,7 @@ import model.Pattern
 import model.ProTrackerModule
 import model.Row
 import model.Instrument
+import model.PanningPosition
 import java.nio.ByteBuffer
 import kotlin.experimental.and
 
@@ -40,7 +41,13 @@ class ProTrackerLoader {
         val patterns = arrayListOf<Pattern>()
 
         for (patternNumber in 0..orderList.maxOrNull()!!) {
-            val channels = arrayListOf(Channel(arrayListOf()), Channel(arrayListOf()), Channel(arrayListOf()), Channel(arrayListOf()))
+            // Panning positions are hard-coded LRRL in 4-channel ProTracker format
+            val channels = arrayListOf(
+                Channel(arrayListOf(), PanningPosition.LEFT),
+                Channel(arrayListOf(), PanningPosition.RIGHT),
+                Channel(arrayListOf(), PanningPosition.RIGHT),
+                Channel(arrayListOf(), PanningPosition.LEFT)
+            )
 
             patterns.add(Pattern(patternNumber, channels))
 

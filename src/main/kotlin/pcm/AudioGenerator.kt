@@ -27,7 +27,7 @@ class AudioGenerator(private val module: ProTrackerModule) {
     init {
         //Generate channel audio generators for each channel in the module
         module.patterns[songPositionState.currentPatternNumber].channels.forEachIndexed { i, channel ->
-            channelAudioGenerators.add(ChannelAudioGenerator(channel.rows[i], module.instruments))
+            channelAudioGenerators.add(ChannelAudioGenerator(channel.rows[i], module.instruments, channel.panningPosition))
         }
     }
 
@@ -38,17 +38,20 @@ class AudioGenerator(private val module: ProTrackerModule) {
     /**
      * Retrieves the next sample in the song, mixing the results from each channel audio generator
      */
-    fun generateNextSample(): Byte {
+    fun generateNextSample(): Pair<Byte, Byte> {
         updateCounters()
 
-        var mixedSamples = 0
+        var leftSample = 0
+        var rightSample = 0
 
         channelAudioGenerators.forEach { generator ->
-            mixedSamples += generator.getNextSample()
+            val nextSample = generator.getNextSample()
+            leftSample += nextSample.first
+            rightSample += nextSample.second
         }
 
         songPositionState.currentSamplePosition++
-        return mixedSamples.coerceAtMost(Byte.MAX_VALUE.toInt()).coerceAtLeast(Byte.MIN_VALUE.toInt()).toByte()
+        return Pair(leftSample.coerceAtMost(Byte.MAX_VALUE.toInt()).coerceAtLeast(Byte.MIN_VALUE.toInt()).toByte(), rightSample.coerceAtMost(Byte.MAX_VALUE.toInt()).coerceAtLeast(Byte.MIN_VALUE.toInt()).toByte())
     }
 
     /**

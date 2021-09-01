@@ -1,6 +1,7 @@
 package pcm
 
 import model.Instrument
+import model.PanningPosition
 import model.Row
 import kotlin.math.floor
 
@@ -11,7 +12,8 @@ import kotlin.math.floor
  */
 class ChannelAudioGenerator(
     row: Row,
-    instruments: List<Instrument>
+    instruments: List<Instrument>,
+    private val panningPosition: PanningPosition
 ) {
     private var audioData: ByteArray? = ByteArray(0)
     private val activeNote = ActiveNote(row)
@@ -48,17 +50,20 @@ class ChannelAudioGenerator(
      *
      * By doing this, we get a smooth line in between samples from the original audio data instead of blocky steps
      */
-    fun getNextSample(): Byte {
+    fun getNextSample(): Pair<Byte, Byte> {
         if (!activeNote.isInstrumentCurrentlyPlaying) {
-            return 0
+            return Pair(0, 0)
         }
 
         val actualSample = ((resamplingState.slope * resamplingState.samplesSinceSampleChanged).toInt() + resamplingState.currentSample).toByte()
 
         updateResamplingState()
 
-        return actualSample
+        return getStereoSample(actualSample)
     }
+
+    private fun getStereoSample(sample: Byte): Pair<Byte, Byte> =
+        if (PanningPosition.LEFT == panningPosition) Pair(sample, 0) else Pair(0, sample)
 
     /**
      * updates the active row of the current object
