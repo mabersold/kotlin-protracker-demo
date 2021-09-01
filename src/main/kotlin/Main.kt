@@ -8,12 +8,14 @@ fun main(args: Array<String>) {
     val audioGenerator = AudioGenerator(module)
     val audioPlayer = AudioPlayer()
 
-    val buffer = ByteBuffer.allocate(1000)
+    val buffer = ByteBuffer.allocate(2000)
 
     audioPlayer.prepareAudioLine()
 
     while (audioGenerator.songStillActive()) {
-        buffer.put(audioGenerator.generateNextSample())
+        val nextSamples = audioGenerator.generateNextSample()
+        buffer.put(nextSamples.first)
+        buffer.put(nextSamples.second)
         if (!buffer.hasRemaining()) {
             audioPlayer.playAudio(buffer.array())
             buffer.clear()
