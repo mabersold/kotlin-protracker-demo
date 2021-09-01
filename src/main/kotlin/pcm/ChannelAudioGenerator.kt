@@ -4,6 +4,7 @@ import model.Instrument
 import model.PanningPosition
 import model.Row
 import kotlin.math.floor
+import kotlin.math.roundToInt
 
 /**
  * ChannelAudioGenerator - does the bulk of the resampling work for a Protracker module
@@ -15,9 +16,9 @@ class ChannelAudioGenerator(
     instruments: List<Instrument>,
     private val panningPosition: PanningPosition
 ) {
-    private var audioData: ByteArray? = ByteArray(0)
     private val activeNote = ActiveNote(row)
     private val resamplingState = ResamplingState()
+    private lateinit var activeInstrument: Instrument
 
     companion object {
         private const val SAMPLING_RATE = 44100.0
@@ -30,13 +31,13 @@ class ChannelAudioGenerator(
             activeNote.activePeriod = activeNote.activeRow.period
             activeNote.activeInstrumentNumber = activeNote.activeRow.instrumentNumber
 
-            audioData = instruments[activeNote.activeInstrumentNumber - 1].audioData
+            activeInstrument = instruments[activeNote.activeInstrumentNumber - 1]
 
             resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.activePeriod)
             resamplingState.iterationsUntilNextSample = getIterationsUntilNextSample(resamplingState.samplesPerSecond, resamplingState.sampleProgressCounter)
 
-            resamplingState.currentSample = audioData?.get(resamplingState.currentSamplePositionOfInstrument) ?: 0
-            resamplingState.nextSample = if(resamplingState.currentSamplePositionOfInstrument + 1 >= audioData?.size!!) 0 else audioData!![resamplingState.currentSamplePositionOfInstrument + 1]
+            resamplingState.currentSample = activeInstrument.audioData?.get(resamplingState.currentSamplePositionOfInstrument) ?: 0
+            resamplingState.nextSample = if(resamplingState.currentSamplePositionOfInstrument + 1 >= activeInstrument.audioData?.size!!) 0 else activeInstrument.audioData!![resamplingState.currentSamplePositionOfInstrument + 1]
             resamplingState.slope = calculateSlope(resamplingState.currentSample, resamplingState.nextSample, resamplingState.iterationsUntilNextSample)
         }
     }
@@ -56,10 +57,16 @@ class ChannelAudioGenerator(
         }
 
         val actualSample = ((resamplingState.slope * resamplingState.samplesSinceSampleChanged).toInt() + resamplingState.currentSample).toByte()
+        val volumeAdjustedSample = adjustForVolume(actualSample, activeInstrument.volume)
 
         updateResamplingState()
 
-        return getStereoSample(actualSample)
+        return getStereoSample(volumeAdjustedSample)
+    }
+
+    private fun adjustForVolume(actualSample: Byte, defaultVolume: Byte): Byte {
+        val volumeRatio = defaultVolume / 64.0
+        return (actualSample * volumeRatio).roundToInt().toByte()
     }
 
     private fun getStereoSample(sample: Byte): Pair<Byte, Byte> =
@@ -90,7 +97,7 @@ class ChannelAudioGenerator(
             // if the new row has an instrument indicated, we need to change the active instrument number
             if (row.instrumentNumber != 0 && row.instrumentNumber != activeNote.activeInstrumentNumber) {
                 activeNote.activeInstrumentNumber = row.instrumentNumber
-                audioData = instruments[activeNote.activeInstrumentNumber - 1].audioData
+                activeInstrument = instruments[activeNote.activeInstrumentNumber - 1]
             }
 
             updateCurrentAndNextSamples()
@@ -128,7 +135,7 @@ class ChannelAudioGenerator(
             resamplingState.currentSamplePositionOfInstrument++
 
             // If we have exceeded the length of the audio data for the current instrument, we want to stop playing it.
-            if (activeNote.isInstrumentCurrentlyPlaying && resamplingState.currentSamplePositionOfInstrument >= audioData?.size!!) {
+            if (activeNote.isInstrumentCurrentlyPlaying && resamplingState.currentSamplePositionOfInstrument >= activeInstrument.audioData?.size!!) {
                 activeNote.isInstrumentCurrentlyPlaying = false
                 activeNote.activePeriod = 0
             }
@@ -147,8 +154,8 @@ class ChannelAudioGenerator(
      */
     private fun updateCurrentAndNextSamples() {
         if (activeNote.isInstrumentCurrentlyPlaying) {
-            resamplingState.currentSample = audioData?.get(resamplingState.currentSamplePositionOfInstrument) ?: 0
-            resamplingState.nextSample = if(resamplingState.currentSamplePositionOfInstrument + 1 == audioData?.size) 0 else audioData?.get(resamplingState.currentSamplePositionOfInstrument + 1) ?: 0
+            resamplingState.currentSample = activeInstrument.audioData?.get(resamplingState.currentSamplePositionOfInstrument) ?: 0
+            resamplingState.nextSample = if(resamplingState.currentSamplePositionOfInstrument + 1 == activeInstrument.audioData?.size) 0 else activeInstrument.audioData?.get(resamplingState.currentSamplePositionOfInstrument + 1) ?: 0
 
             resamplingState.slope = calculateSlope(resamplingState.currentSample, resamplingState.nextSample, resamplingState.iterationsUntilNextSample)
         }
