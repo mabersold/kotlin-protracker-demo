@@ -64,11 +64,22 @@ class ChannelAudioGenerator(
         return getStereoSample(volumeAdjustedSample)
     }
 
+    /**
+     * Accepts the sample and responds with a volume-adjusted sample. Maximum volume is 64 - at 64, it will simply respond
+     * with the sample at the original value that it was already at. For anything below 64, it determines the volume ratio
+     * and multiplies the sample by that. A volume value of zero will result in a sample value of zero.
+     */
     private fun adjustForVolume(actualSample: Byte, defaultVolume: Byte): Byte {
         val volumeRatio = defaultVolume / 64.0
         return (actualSample * volumeRatio).roundToInt().toByte()
     }
 
+    /**
+     * Accepts a sample byte and responds with a pair of bytes adjusted for stereo panning
+     *
+     * Protracker panning is very simple: it's either left channel or right channel. All we need to do is respond with the
+     * sample in the pair's first field for left panning, or second field for right panning.
+     */
     private fun getStereoSample(sample: Byte): Pair<Byte, Byte> =
         if (PanningPosition.LEFT == panningPosition) Pair(sample, 0) else Pair(0, sample)
 
@@ -134,8 +145,8 @@ class ChannelAudioGenerator(
             resamplingState.sampleProgressCounter -= SAMPLING_RATE
             resamplingState.currentSamplePositionOfInstrument++
 
-            // If we have exceeded the length of the audio data for the current instrument, we want to stop playing it.
-            if (activeNote.isInstrumentCurrentlyPlaying && resamplingState.currentSamplePositionOfInstrument >= activeInstrument.audioData?.size!!) {
+            // If we have exceeded the length of the audio data for an unlooped instrument, we want to stop playing it
+            if (!isInstrumentLooped(activeInstrument) && activeNote.isInstrumentCurrentlyPlaying && resamplingState.currentSamplePositionOfInstrument >= activeInstrument.audioData?.size!!) {
                 activeNote.isInstrumentCurrentlyPlaying = false
                 activeNote.activePeriod = 0
             }
@@ -153,12 +164,37 @@ class ChannelAudioGenerator(
      * the audio data during the resampling process
      */
     private fun updateCurrentAndNextSamples() {
-        if (activeNote.isInstrumentCurrentlyPlaying) {
-            resamplingState.currentSample = activeInstrument.audioData?.get(resamplingState.currentSamplePositionOfInstrument) ?: 0
-            resamplingState.nextSample = if(resamplingState.currentSamplePositionOfInstrument + 1 == activeInstrument.audioData?.size) 0 else activeInstrument.audioData?.get(resamplingState.currentSamplePositionOfInstrument + 1) ?: 0
-
-            resamplingState.slope = calculateSlope(resamplingState.currentSample, resamplingState.nextSample, resamplingState.iterationsUntilNextSample)
+        if (!activeNote.isInstrumentCurrentlyPlaying) {
+            return
         }
+
+        // If the instrument is looped and we have exceeded the length of the audio file, set the new sample position to the loop offset
+        if (isInstrumentLooped(activeInstrument) && resamplingState.currentSamplePositionOfInstrument >= activeInstrument.audioData?.size!!) {
+            resamplingState.currentSamplePositionOfInstrument = activeInstrument.repeatOffsetStart * 2
+        }
+
+        resamplingState.currentSample = activeInstrument.audioData?.get(resamplingState.currentSamplePositionOfInstrument) ?: 0
+        resamplingState.nextSample = getNextSample(activeInstrument, resamplingState.currentSamplePositionOfInstrument)
+
+        resamplingState.slope = calculateSlope(resamplingState.currentSample, resamplingState.nextSample, resamplingState.iterationsUntilNextSample)
+    }
+
+    /**
+     * Determine the next sample we will use for interpolation. Normally, this will just be 1 position higher than the
+     * current sample. If we reach the end of the audio data, we will either return a 0 (for an unlooped instrument) or
+     * whatever is at the repeat offset (for a looped instrument)
+     */
+    private fun getNextSample(instrument: Instrument, currentSamplePosition: Int): Byte {
+        if (currentSamplePosition + 1 >= instrument.audioData?.size!!) {
+            if (!isInstrumentLooped(instrument)) {
+                return 0
+            }
+
+            //if the instrument is looped, return whatever value is at the repeat offset start
+            return instrument.audioData?.get(instrument.repeatOffsetStart * 2)!!
+        }
+
+        return instrument.audioData?.get(currentSamplePosition + 1) ?: 0
     }
 
     private fun calculateSlope(firstSample: Byte, secondSample: Byte, run: Int): Double =
@@ -166,6 +202,9 @@ class ChannelAudioGenerator(
 
     private fun getSamplesPerSecond(activePeriod: Int) =
         PAL_CLOCK_RATE / (activePeriod * 2)
+
+    private fun isInstrumentLooped(instrument: Instrument) =
+        instrument.repeatLength > 1
 
     data class ResamplingState(
         var samplesPerSecond: Double = 0.0,
