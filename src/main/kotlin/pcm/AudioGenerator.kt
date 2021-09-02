@@ -31,9 +31,8 @@ class AudioGenerator(private val module: ProTrackerModule) {
         }
     }
 
-    fun songStillActive(): Boolean {
-        return songPositionState.currentOrderListPosition < orderList.size
-    }
+    fun songStillActive(): Boolean =
+        songPositionState.currentOrderListPosition < orderList.size
 
     /**
      * Retrieves the next sample in the song, mixing the results from each channel audio generator
@@ -79,7 +78,13 @@ class AudioGenerator(private val module: ProTrackerModule) {
             songPositionState.currentRowPosition = 0
         }
 
-        if (songStillActive() && isStartOfNewRow(songPositionState)) {
+        if (isStartOfNewTick(songPositionState)) {
+            channelAudioGenerators.forEach { generator ->
+                generator.applyPerTickEffects()
+            }
+        }
+
+        if (isStartOfNewRow(songPositionState)) {
             updateRow(songPositionState.currentRowPosition)
         }
     }
@@ -91,8 +96,11 @@ class AudioGenerator(private val module: ProTrackerModule) {
         return samplesPerRow / ticksPerRow
     }
 
+    private fun isStartOfNewTick(songPositionState: SongPositionState): Boolean =
+        songStillActive() && songPositionState.currentSamplePosition == 0
+
     private fun isStartOfNewRow(songPositionState: SongPositionState): Boolean =
-        songPositionState.currentTickPosition == 0 && songPositionState.currentSamplePosition == 0
+        songStillActive() && songPositionState.currentTickPosition == 0 && songPositionState.currentSamplePosition == 0
 
     /**
      * Updates the channel audio generators with new row information - note, effects, and audio data

@@ -48,6 +48,19 @@ class ChannelAudioGenerator(
     }
 
     /**
+     * Some effect commands take place for every tick. This function invokes those effects.
+     */
+    fun applyPerTickEffects() {
+        if (activeNote.activeRow.effectNumber == 10) {
+            currentVolume = if (activeNote.activeRow.effectXValue > 0) {
+                (activeNote.activeRow.effectXValue + currentVolume).coerceAtMost(64).toByte()
+            } else {
+                (currentVolume - activeNote.activeRow.effectYValue).coerceAtLeast(0).toByte()
+            }
+        }
+    }
+
+    /**
      * Accepts the sample and responds with a volume-adjusted sample. Maximum volume is 64 - at 64, it will simply respond
      * with the sample at the original value that it was already at. For anything below 64, it determines the volume ratio
      * and multiplies the sample by that. A volume value of zero will result in a sample value of zero.
@@ -81,6 +94,7 @@ class ChannelAudioGenerator(
      * if it is present
      */
     fun updateActiveRow(row: Row, instruments: List<Instrument>) {
+        activeNote.activeRow = row
         if (row.period != 0) {
             // if the new row has a note indicated, we need to change the active period to the new active period and reset the instrument sampling position
             activeNote.isInstrumentCurrentlyPlaying = true
