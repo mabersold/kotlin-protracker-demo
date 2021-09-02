@@ -13,33 +13,16 @@ import kotlin.math.roundToInt
  */
 class ChannelAudioGenerator(
     row: Row,
-    instruments: List<Instrument>,
     private val panningPosition: PanningPosition
 ) {
     private val activeNote = ActiveNote(row)
     private val resamplingState = ResamplingState()
     private lateinit var activeInstrument: Instrument
+    private var currentVolume: Byte = 0
 
     companion object {
         private const val SAMPLING_RATE = 44100.0
         private const val PAL_CLOCK_RATE = 7093789.2
-    }
-
-    init {
-        if (activeNote.activeRow.period != 0) {
-            activeNote.isInstrumentCurrentlyPlaying = true
-            activeNote.activePeriod = activeNote.activeRow.period
-            activeNote.activeInstrumentNumber = activeNote.activeRow.instrumentNumber
-
-            activeInstrument = instruments[activeNote.activeInstrumentNumber - 1]
-
-            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.activePeriod)
-            resamplingState.iterationsUntilNextSample = getIterationsUntilNextSample(resamplingState.samplesPerSecond, resamplingState.sampleProgressCounter)
-
-            resamplingState.currentSample = activeInstrument.audioData?.get(resamplingState.currentSamplePositionOfInstrument) ?: 0
-            resamplingState.nextSample = if(resamplingState.currentSamplePositionOfInstrument + 1 >= activeInstrument.audioData?.size!!) 0 else activeInstrument.audioData!![resamplingState.currentSamplePositionOfInstrument + 1]
-            resamplingState.slope = calculateSlope(resamplingState.currentSample, resamplingState.nextSample, resamplingState.iterationsUntilNextSample)
-        }
     }
 
     /**
@@ -57,7 +40,7 @@ class ChannelAudioGenerator(
         }
 
         val actualSample = ((resamplingState.slope * resamplingState.samplesSinceSampleChanged).toInt() + resamplingState.currentSample).toByte()
-        val volumeAdjustedSample = adjustForVolume(actualSample, activeInstrument.volume)
+        val volumeAdjustedSample = adjustForVolume(actualSample, currentVolume)
 
         updateResamplingState()
 
@@ -69,9 +52,12 @@ class ChannelAudioGenerator(
      * with the sample at the original value that it was already at. For anything below 64, it determines the volume ratio
      * and multiplies the sample by that. A volume value of zero will result in a sample value of zero.
      */
-    private fun adjustForVolume(actualSample: Byte, defaultVolume: Byte): Byte {
-        val volumeRatio = defaultVolume / 64.0
-        return (actualSample * volumeRatio).roundToInt().toByte()
+    private fun adjustForVolume(actualSample: Byte, volume: Byte): Byte {
+        if (volume == 64.toByte()) {
+            return actualSample
+        }
+
+        return (actualSample * (volume / 64.0)).roundToInt().toByte()
     }
 
     /**
@@ -111,7 +97,18 @@ class ChannelAudioGenerator(
                 activeInstrument = instruments[activeNote.activeInstrumentNumber - 1]
             }
 
+            currentVolume = if (row.effectNumber == 12) {
+                (row.effectXValue * 16 + row.effectYValue).coerceAtMost(64).toByte()
+            } else {
+                activeInstrument.volume
+            }
+
             updateCurrentAndNextSamples()
+        }
+
+        // A change volume effect can take place without a new note effect - in this case, we apply the
+        if (row.effectNumber == 12) {
+            currentVolume = (row.effectXValue * 16 + row.effectYValue).coerceAtMost(64).toByte()
         }
     }
 
