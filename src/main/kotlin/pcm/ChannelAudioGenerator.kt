@@ -48,41 +48,6 @@ class ChannelAudioGenerator(
     }
 
     /**
-     * Some effect commands take place for every tick. This function invokes those effects.
-     */
-    fun applyPerTickEffects() {
-        if (activeNote.activeRow.effectNumber == 10) {
-            currentVolume = if (activeNote.activeRow.effectXValue > 0) {
-                (activeNote.activeRow.effectXValue + currentVolume).coerceAtMost(64).toByte()
-            } else {
-                (currentVolume - activeNote.activeRow.effectYValue).coerceAtLeast(0).toByte()
-            }
-        }
-    }
-
-    /**
-     * Accepts the sample and responds with a volume-adjusted sample. Maximum volume is 64 - at 64, it will simply respond
-     * with the sample at the original value that it was already at. For anything below 64, it determines the volume ratio
-     * and multiplies the sample by that. A volume value of zero will result in a sample value of zero.
-     */
-    private fun adjustForVolume(actualSample: Byte, volume: Byte): Byte {
-        if (volume == 64.toByte()) {
-            return actualSample
-        }
-
-        return (actualSample * (volume / 64.0)).roundToInt().toByte()
-    }
-
-    /**
-     * Accepts a sample byte and responds with a pair of bytes adjusted for stereo panning
-     *
-     * Protracker panning is very simple: it's either left channel or right channel. All we need to do is respond with the
-     * sample in the pair's first field for left panning, or second field for right panning.
-     */
-    private fun getStereoSample(sample: Byte): Pair<Byte, Byte> =
-        if (PanningPosition.LEFT == panningPosition) Pair(sample, 0) else Pair(0, sample)
-
-    /**
      * updates the active row of the current object
      *
      * receives a row and a list of instruments
@@ -125,6 +90,41 @@ class ChannelAudioGenerator(
             currentVolume = (row.effectXValue * 16 + row.effectYValue).coerceAtMost(64).toByte()
         }
     }
+
+    /**
+     * Some effect commands take place for every tick. This function invokes those effects.
+     */
+    fun applyPerTickEffects() {
+        if (activeNote.activeRow.effectNumber == 10) {
+            currentVolume = if (activeNote.activeRow.effectXValue > 0) {
+                (activeNote.activeRow.effectXValue + currentVolume).coerceAtMost(64).toByte()
+            } else {
+                (currentVolume - activeNote.activeRow.effectYValue).coerceAtLeast(0).toByte()
+            }
+        }
+    }
+
+    /**
+     * Accepts the sample and responds with a volume-adjusted sample. Maximum volume is 64 - at 64, it will simply respond
+     * with the sample at the original value that it was already at. For anything below 64, it determines the volume ratio
+     * and multiplies the sample by that. A volume value of zero will result in a sample value of zero.
+     */
+    private fun adjustForVolume(actualSample: Byte, volume: Byte): Byte {
+        if (volume == 64.toByte()) {
+            return actualSample
+        }
+
+        return (actualSample * (volume / 64.0)).roundToInt().toByte()
+    }
+
+    /**
+     * Accepts a sample byte and responds with a pair of bytes adjusted for stereo panning
+     *
+     * Protracker panning is very simple: it's either left channel or right channel. All we need to do is respond with the
+     * sample in the pair's first field for left panning, or second field for right panning.
+     */
+    private fun getStereoSample(sample: Byte): Pair<Byte, Byte> =
+        if (PanningPosition.LEFT == panningPosition) Pair(sample, 0) else Pair(0, sample)
 
     /**
      * For resampling purposes, determine how many iterations of the current sample will take place between now and the
