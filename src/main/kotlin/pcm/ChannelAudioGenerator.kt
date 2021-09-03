@@ -12,10 +12,9 @@ import kotlin.math.roundToInt
  * Contains audio PCM data, information about the current note being played, and resampling state information
  */
 class ChannelAudioGenerator(
-    row: Row,
     private val panningPosition: PanningPosition
 ) {
-    private val activeNote = ActiveNote(row)
+    private val activeNote = ActiveNote()
     private val resamplingState = ResamplingState()
     private lateinit var activeInstrument: Instrument
     private var currentVolume: Byte = 0
@@ -59,8 +58,6 @@ class ChannelAudioGenerator(
      * if it is present
      */
     fun updateActiveRow(row: Row, instruments: List<Instrument>) {
-        activeNote.activeRow = row
-
         if (row.instrumentNumber != 0 && row.instrumentNumber != activeNote.instrumentNumber) {
             activeNote.instrumentNumber = row.instrumentNumber
             activeInstrument = instruments[activeNote.instrumentNumber - 1]
@@ -91,7 +88,16 @@ class ChannelAudioGenerator(
             updateCurrentAndNextSamples()
         }
 
-        // A change volume effect can take place without a new note effect - in this case, we apply the
+
+        if (row.effectNumber != activeNote.effectNumber) {
+            //if the effect number is different, always change the effect and parameters
+            activeNote.effectNumber = row.effectNumber
+        }
+
+        activeNote.effectXValue = row.effectXValue
+        activeNote.effectYValue = row.effectYValue
+
+        // A change volume effect can take place without a new note effect
         if (row.effectNumber == 12) {
             currentVolume = (row.effectXValue * 16 + row.effectYValue).coerceAtMost(64).toByte()
         }
@@ -101,11 +107,11 @@ class ChannelAudioGenerator(
      * Some effect commands take place for every tick. This function invokes those effects.
      */
     fun applyPerTickEffects() {
-        if (activeNote.activeRow.effectNumber == 10) {
-            currentVolume = if (activeNote.activeRow.effectXValue > 0) {
-                (activeNote.activeRow.effectXValue + currentVolume).coerceAtMost(64).toByte()
+        if (activeNote.effectNumber == 10) {
+            currentVolume = if (activeNote.effectXValue > 0) {
+                (activeNote.effectXValue + currentVolume).coerceAtMost(64).toByte()
             } else {
-                (currentVolume - activeNote.activeRow.effectYValue).coerceAtLeast(0).toByte()
+                (currentVolume - activeNote.effectYValue).coerceAtLeast(0).toByte()
             }
         }
     }
@@ -235,7 +241,6 @@ class ChannelAudioGenerator(
     )
 
     data class ActiveNote(
-        var activeRow: Row,
         var isInstrumentCurrentlyPlaying: Boolean = false,
         var period: Int = 0, //The period (aka note) can be modified by effects, so it should be tracked separately from the active row
         var instrumentNumber: Int = 0,
