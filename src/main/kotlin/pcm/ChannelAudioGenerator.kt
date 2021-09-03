@@ -60,21 +60,27 @@ class ChannelAudioGenerator(
      */
     fun updateActiveRow(row: Row, instruments: List<Instrument>) {
         activeNote.activeRow = row
+
+        if (row.instrumentNumber != 0 && row.instrumentNumber != activeNote.instrumentNumber) {
+            activeNote.instrumentNumber = row.instrumentNumber
+            activeInstrument = instruments[activeNote.instrumentNumber - 1]
+
+            // In rare circumstances, an instrument number might be provided without an accompanying note - if this is
+            // a different instrument than the one currently playing, stop playing it.
+            if (row.period == 0) {
+                activeNote.isInstrumentCurrentlyPlaying = false
+            }
+        }
+
         if (row.period != 0) {
             // if the new row has a note indicated, we need to change the active period to the new active period and reset the instrument sampling position
             activeNote.isInstrumentCurrentlyPlaying = true
-            activeNote.activePeriod = row.period
+            activeNote.period = row.period
             resamplingState.currentSamplePositionOfInstrument = 2
 
             resamplingState.samplesSinceSampleChanged = 0
             resamplingState.sampleProgressCounter = 0.0
-            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.activePeriod)
-
-            // if the new row has an instrument indicated, we need to change the active instrument number
-            if (row.instrumentNumber != 0 && row.instrumentNumber != activeNote.activeInstrumentNumber) {
-                activeNote.activeInstrumentNumber = row.instrumentNumber
-                activeInstrument = instruments[activeNote.activeInstrumentNumber - 1]
-            }
+            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.period)
 
             currentVolume = if (row.effectNumber == 12) {
                 (row.effectXValue * 16 + row.effectYValue).coerceAtMost(64).toByte()
@@ -159,12 +165,12 @@ class ChannelAudioGenerator(
             // If we have exceeded the length of the audio data for an unlooped instrument, we want to stop playing it
             if (!isInstrumentLooped(activeInstrument) && activeNote.isInstrumentCurrentlyPlaying && resamplingState.currentSamplePositionOfInstrument >= activeInstrument.audioData?.size!!) {
                 activeNote.isInstrumentCurrentlyPlaying = false
-                activeNote.activePeriod = 0
+                activeNote.period = 0
             }
 
             updateCurrentAndNextSamples()
 
-            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.activePeriod)
+            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.period)
             resamplingState.iterationsUntilNextSample = getIterationsUntilNextSample(resamplingState.samplesPerSecond, resamplingState.sampleProgressCounter)
             resamplingState.samplesSinceSampleChanged = 0
         }
@@ -231,7 +237,10 @@ class ChannelAudioGenerator(
     data class ActiveNote(
         var activeRow: Row,
         var isInstrumentCurrentlyPlaying: Boolean = false,
-        var activePeriod: Int = 0, //The period (aka note) can be modified by effects, so it should be tracked separately from the active row
-        var activeInstrumentNumber: Int = 0
+        var period: Int = 0, //The period (aka note) can be modified by effects, so it should be tracked separately from the active row
+        var instrumentNumber: Int = 0,
+        var effectNumber: Int = 0,
+        var effectXValue: Int = 0,
+        var effectYValue: Int = 0
     )
 }
