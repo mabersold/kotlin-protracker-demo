@@ -88,14 +88,14 @@ class ChannelAudioGenerator(
             updateCurrentAndNextSamples()
         }
 
-
-        if (row.effectNumber != activeNote.effectNumber) {
-            //if the effect number is different, always change the effect and parameters
-            activeNote.effectNumber = row.effectNumber
+        if (shouldUpdateEffectParameters(row, activeNote)) {
+            activeNote.effectXValue = row.effectXValue
+            activeNote.effectYValue = row.effectYValue
         }
 
-        activeNote.effectXValue = row.effectXValue
-        activeNote.effectYValue = row.effectYValue
+        if (row.effectNumber != activeNote.effectNumber) {
+            activeNote.effectNumber = row.effectNumber
+        }
 
         // A change volume effect can take place without a new note effect
         if (row.effectNumber == 12) {
@@ -228,6 +228,12 @@ class ChannelAudioGenerator(
 
     private fun isInstrumentLooped(instrument: Instrument) =
         instrument.repeatLength > 1
+
+    private fun shouldUpdateEffectParameters(row: Row, activeNote: ActiveNote) =
+        row.effectNumber != activeNote.effectNumber ||
+                !listOf(1, 2, 3).contains(row.effectNumber) ||
+                row.effectXValue != 0 ||
+                row.effectYValue != 0
 
     data class ResamplingState(
         var samplesPerSecond: Double = 0.0,
