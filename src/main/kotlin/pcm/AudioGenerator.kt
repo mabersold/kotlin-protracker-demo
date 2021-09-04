@@ -38,7 +38,7 @@ class AudioGenerator(private val module: ProTrackerModule) {
      * Retrieves the next sample in the song, mixing the results from each channel audio generator
      */
     fun generateNextSample(): Pair<Byte, Byte> {
-        updateCounters()
+        updateRowData()
 
         var leftSample = 0
         var rightSample = 0
@@ -49,7 +49,9 @@ class AudioGenerator(private val module: ProTrackerModule) {
             rightSample += nextSample.second
         }
 
-        songPositionState.currentSamplePosition++
+        updateCounters()
+        applyPerTickEffects()
+
         return Pair(
             leftSample.coerceAtMost(Byte.MAX_VALUE.toInt()).coerceAtLeast(Byte.MIN_VALUE.toInt()).toByte(),
             rightSample.coerceAtMost(Byte.MAX_VALUE.toInt()).coerceAtLeast(Byte.MIN_VALUE.toInt()).toByte()
@@ -57,9 +59,17 @@ class AudioGenerator(private val module: ProTrackerModule) {
     }
 
     /**
-     * Updates the progress of the module, to be called after each sample is generated
+     * If we are at the start of a new row, update the channel audio generators with new row data
      */
+    private fun updateRowData() {
+        if (isStartOfNewRow(songPositionState)) {
+            updateRow(songPositionState.currentRowPosition)
+        }
+    }
+
     private fun updateCounters() {
+        songPositionState.currentSamplePosition++
+
         //if samplePosition > samples per tick, go to the next tick
         if (songPositionState.currentSamplePosition > samplesPerTick) {
             songPositionState.currentSamplePosition = 0
@@ -77,15 +87,13 @@ class AudioGenerator(private val module: ProTrackerModule) {
             songPositionState.currentOrderListPosition++
             songPositionState.currentRowPosition = 0
         }
+    }
 
+    private fun applyPerTickEffects() {
         if (isStartOfNewTick(songPositionState)) {
             channelAudioGenerators.forEach { generator ->
                 generator.applyPerTickEffects()
             }
-        }
-
-        if (isStartOfNewRow(songPositionState)) {
-            updateRow(songPositionState.currentRowPosition)
         }
     }
 

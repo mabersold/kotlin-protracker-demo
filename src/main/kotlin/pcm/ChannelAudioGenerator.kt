@@ -67,23 +67,25 @@ class ChannelAudioGenerator(
             if (row.period == 0) {
                 activeNote.isInstrumentCurrentlyPlaying = false
             }
+
+            //Only change the volume when an instrument is specified, regardless of whether a period is specified
+            currentVolume = activeInstrument.volume
         }
 
         if (row.period != 0) {
             // if the new row has a note indicated, we need to change the active period to the new active period and reset the instrument sampling position
+            activeNote.specifiedPeriod = row.period
+
+            if (row.effectNumber != 3) {
+                activeNote.actualPeriod = row.period
+            }
+
             activeNote.isInstrumentCurrentlyPlaying = true
-            activeNote.period = row.period
             resamplingState.currentSamplePositionOfInstrument = 2
 
             resamplingState.samplesSinceSampleChanged = 0
             resamplingState.sampleProgressCounter = 0.0
-            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.period)
-
-            currentVolume = if (row.effectNumber == 12) {
-                (row.effectXValue * 16 + row.effectYValue).coerceAtMost(64).toByte()
-            } else {
-                activeInstrument.volume
-            }
+            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
 
             updateCurrentAndNextSamples()
         }
@@ -112,6 +114,14 @@ class ChannelAudioGenerator(
                 (activeNote.effectXValue + currentVolume).coerceAtMost(64).toByte()
             } else {
                 (currentVolume - activeNote.effectYValue).coerceAtLeast(0).toByte()
+            }
+        } else if (activeNote.effectNumber == 3) {
+            if (activeNote.actualPeriod > activeNote.specifiedPeriod) {
+                val amountToDecreasePeriod = activeNote.effectXValue * 16 + activeNote.effectYValue
+                activeNote.actualPeriod = (activeNote.actualPeriod - amountToDecreasePeriod).coerceAtLeast(activeNote.specifiedPeriod)
+            } else if (activeNote.actualPeriod < activeNote.specifiedPeriod) {
+                val amountToIncreasePeriod = activeNote.effectXValue * 16 + activeNote.effectYValue
+                activeNote.actualPeriod = (activeNote.actualPeriod + amountToIncreasePeriod).coerceAtMost(activeNote.specifiedPeriod)
             }
         }
     }
@@ -171,12 +181,12 @@ class ChannelAudioGenerator(
             // If we have exceeded the length of the audio data for an unlooped instrument, we want to stop playing it
             if (!isInstrumentLooped(activeInstrument) && activeNote.isInstrumentCurrentlyPlaying && resamplingState.currentSamplePositionOfInstrument >= activeInstrument.audioData?.size!!) {
                 activeNote.isInstrumentCurrentlyPlaying = false
-                activeNote.period = 0
+                activeNote.actualPeriod = 0
             }
 
             updateCurrentAndNextSamples()
 
-            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.period)
+            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
             resamplingState.iterationsUntilNextSample = getIterationsUntilNextSample(resamplingState.samplesPerSecond, resamplingState.sampleProgressCounter)
             resamplingState.samplesSinceSampleChanged = 0
         }
@@ -248,7 +258,8 @@ class ChannelAudioGenerator(
 
     data class ActiveNote(
         var isInstrumentCurrentlyPlaying: Boolean = false,
-        var period: Int = 0, //The period (aka note) can be modified by effects, so it should be tracked separately from the active row
+        var actualPeriod: Int = 0,
+        var specifiedPeriod: Int = 0,
         var instrumentNumber: Int = 0,
         var effectNumber: Int = 0,
         var effectXValue: Int = 0,
