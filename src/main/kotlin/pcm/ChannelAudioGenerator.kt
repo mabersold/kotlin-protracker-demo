@@ -119,9 +119,11 @@ class ChannelAudioGenerator(
             if (activeNote.actualPeriod > activeNote.specifiedPeriod) {
                 val amountToDecreasePeriod = activeNote.effectXValue * 16 + activeNote.effectYValue
                 activeNote.actualPeriod = (activeNote.actualPeriod - amountToDecreasePeriod).coerceAtLeast(activeNote.specifiedPeriod)
+                resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
             } else if (activeNote.actualPeriod < activeNote.specifiedPeriod) {
                 val amountToIncreasePeriod = activeNote.effectXValue * 16 + activeNote.effectYValue
                 activeNote.actualPeriod = (activeNote.actualPeriod + amountToIncreasePeriod).coerceAtMost(activeNote.specifiedPeriod)
+                resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
             }
         }
     }
