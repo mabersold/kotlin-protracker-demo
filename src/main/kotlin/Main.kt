@@ -4,7 +4,7 @@ import java.nio.ByteBuffer
 
 fun main(args: Array<String>) {
     val loader = ProTrackerLoader()
-    val module = loader.loadModule("test.mod")
+    val module = loader.loadModule("space_debris.mod")
     val audioGenerator = AudioGenerator(module)
     val audioPlayer = AudioPlayer()
 

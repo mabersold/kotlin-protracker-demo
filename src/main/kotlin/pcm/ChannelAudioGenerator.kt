@@ -12,10 +12,9 @@ import kotlin.math.roundToInt
  * Contains audio PCM data, information about the current note being played, and resampling state information
  */
 class ChannelAudioGenerator(
-    row: Row,
     private val panningPosition: PanningPosition
 ) {
-    private val activeNote = ActiveNote(row)
+    private val activeNote = ActiveNote()
     private val resamplingState = ResamplingState()
     private lateinit var activeInstrument: Instrument
     private var currentVolume: Byte = 0
@@ -59,33 +58,48 @@ class ChannelAudioGenerator(
      * if it is present
      */
     fun updateActiveRow(row: Row, instruments: List<Instrument>) {
-        activeNote.activeRow = row
+        if (row.instrumentNumber != 0 && row.instrumentNumber != activeNote.instrumentNumber) {
+            activeNote.instrumentNumber = row.instrumentNumber
+            activeInstrument = instruments[activeNote.instrumentNumber - 1]
+
+            // In rare circumstances, an instrument number might be provided without an accompanying note - if this is
+            // a different instrument than the one currently playing, stop playing it.
+            if (row.period == 0) {
+                activeNote.isInstrumentCurrentlyPlaying = false
+            }
+
+            //Only change the volume when an instrument is specified, regardless of whether a period is specified
+            currentVolume = activeInstrument.volume
+        }
+
         if (row.period != 0) {
             // if the new row has a note indicated, we need to change the active period to the new active period and reset the instrument sampling position
+            activeNote.specifiedPeriod = row.period
+
+            if (row.effectNumber != 3) {
+                activeNote.actualPeriod = row.period
+            }
+
             activeNote.isInstrumentCurrentlyPlaying = true
-            activeNote.activePeriod = row.period
             resamplingState.currentSamplePositionOfInstrument = 2
 
             resamplingState.samplesSinceSampleChanged = 0
             resamplingState.sampleProgressCounter = 0.0
-            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.activePeriod)
-
-            // if the new row has an instrument indicated, we need to change the active instrument number
-            if (row.instrumentNumber != 0 && row.instrumentNumber != activeNote.activeInstrumentNumber) {
-                activeNote.activeInstrumentNumber = row.instrumentNumber
-                activeInstrument = instruments[activeNote.activeInstrumentNumber - 1]
-            }
-
-            currentVolume = if (row.effectNumber == 12) {
-                (row.effectXValue * 16 + row.effectYValue).coerceAtMost(64).toByte()
-            } else {
-                activeInstrument.volume
-            }
+            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
 
             updateCurrentAndNextSamples()
         }
 
-        // A change volume effect can take place without a new note effect - in this case, we apply the
+        if (shouldUpdateEffectParameters(row, activeNote)) {
+            activeNote.effectXValue = row.effectXValue
+            activeNote.effectYValue = row.effectYValue
+        }
+
+        if (row.effectNumber != activeNote.effectNumber) {
+            activeNote.effectNumber = row.effectNumber
+        }
+
+        // A change volume effect can take place without a new note effect
         if (row.effectNumber == 12) {
             currentVolume = (row.effectXValue * 16 + row.effectYValue).coerceAtMost(64).toByte()
         }
@@ -95,11 +109,21 @@ class ChannelAudioGenerator(
      * Some effect commands take place for every tick. This function invokes those effects.
      */
     fun applyPerTickEffects() {
-        if (activeNote.activeRow.effectNumber == 10) {
-            currentVolume = if (activeNote.activeRow.effectXValue > 0) {
-                (activeNote.activeRow.effectXValue + currentVolume).coerceAtMost(64).toByte()
+        if (activeNote.effectNumber == 10) {
+            currentVolume = if (activeNote.effectXValue > 0) {
+                (activeNote.effectXValue + currentVolume).coerceAtMost(64).toByte()
             } else {
-                (currentVolume - activeNote.activeRow.effectYValue).coerceAtLeast(0).toByte()
+                (currentVolume - activeNote.effectYValue).coerceAtLeast(0).toByte()
+            }
+        } else if (activeNote.effectNumber == 3) {
+            if (activeNote.actualPeriod > activeNote.specifiedPeriod) {
+                val amountToDecreasePeriod = activeNote.effectXValue * 16 + activeNote.effectYValue
+                activeNote.actualPeriod = (activeNote.actualPeriod - amountToDecreasePeriod).coerceAtLeast(activeNote.specifiedPeriod)
+                resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
+            } else if (activeNote.actualPeriod < activeNote.specifiedPeriod) {
+                val amountToIncreasePeriod = activeNote.effectXValue * 16 + activeNote.effectYValue
+                activeNote.actualPeriod = (activeNote.actualPeriod + amountToIncreasePeriod).coerceAtMost(activeNote.specifiedPeriod)
+                resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
             }
         }
     }
@@ -159,12 +183,12 @@ class ChannelAudioGenerator(
             // If we have exceeded the length of the audio data for an unlooped instrument, we want to stop playing it
             if (!isInstrumentLooped(activeInstrument) && activeNote.isInstrumentCurrentlyPlaying && resamplingState.currentSamplePositionOfInstrument >= activeInstrument.audioData?.size!!) {
                 activeNote.isInstrumentCurrentlyPlaying = false
-                activeNote.activePeriod = 0
+                activeNote.actualPeriod = 0
             }
 
             updateCurrentAndNextSamples()
 
-            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.activePeriod)
+            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
             resamplingState.iterationsUntilNextSample = getIterationsUntilNextSample(resamplingState.samplesPerSecond, resamplingState.sampleProgressCounter)
             resamplingState.samplesSinceSampleChanged = 0
         }
@@ -217,6 +241,12 @@ class ChannelAudioGenerator(
     private fun isInstrumentLooped(instrument: Instrument) =
         instrument.repeatLength > 1
 
+    private fun shouldUpdateEffectParameters(row: Row, activeNote: ActiveNote) =
+        row.effectNumber != activeNote.effectNumber ||
+                !listOf(1, 2, 3).contains(row.effectNumber) ||
+                row.effectXValue != 0 ||
+                row.effectYValue != 0
+
     data class ResamplingState(
         var samplesPerSecond: Double = 0.0,
         var iterationsUntilNextSample: Int = 0,
@@ -229,9 +259,12 @@ class ChannelAudioGenerator(
     )
 
     data class ActiveNote(
-        var activeRow: Row,
         var isInstrumentCurrentlyPlaying: Boolean = false,
-        var activePeriod: Int = 0, //The period (aka note) can be modified by effects, so it should be tracked separately from the active row
-        var activeInstrumentNumber: Int = 0
+        var actualPeriod: Int = 0,
+        var specifiedPeriod: Int = 0,
+        var instrumentNumber: Int = 0,
+        var effectNumber: Int = 0,
+        var effectXValue: Int = 0,
+        var effectYValue: Int = 0
     )
 }
