@@ -5,11 +5,11 @@ import java.nio.ByteBuffer
 fun main(args: Array<String>) {
     val loader = ProTrackerLoader()
     val module = loader.loadModule("space_debris.mod")
-    val audioGenerator = AudioGenerator(module)
-    val audioPlayer = AudioPlayer()
 
+    val audioGenerator = AudioGenerator(module)
     val buffer = ByteBuffer.allocate(2000)
 
+    val audioPlayer = AudioPlayer()
     audioPlayer.prepareAudioLine()
 
     while (audioGenerator.songStillActive()) {
