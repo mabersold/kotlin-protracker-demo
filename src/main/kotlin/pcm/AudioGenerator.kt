@@ -44,7 +44,7 @@ class AudioGenerator(private val module: ProTrackerModule) {
         var rightSample = 0
 
         channelAudioGenerators.forEach { generator ->
-            val nextSample = generator.getNextSample2()
+            val nextSample = generator.getNextSample()
             leftSample += nextSample.first
             rightSample += nextSample.second
         }
