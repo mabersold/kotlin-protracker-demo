@@ -10,6 +10,8 @@ import model.ProTrackerModule
  * Maintains the current position of the module and retrieves and mixes channel audio
  */
 class AudioGenerator(private val module: ProTrackerModule) {
+    val soloChannels = arrayListOf<Int>()
+
     //these will eventually need to be vars since they can be modified by effects, but they can be vals for now
     private val ticksPerRow = 6
     private val beatsPerMinute = 125
@@ -43,10 +45,12 @@ class AudioGenerator(private val module: ProTrackerModule) {
         var leftSample = 0
         var rightSample = 0
 
-        channelAudioGenerators.forEach { generator ->
-            val nextSample = generator.getNextSample()
-            leftSample += nextSample.first
-            rightSample += nextSample.second
+        channelAudioGenerators.forEachIndexed { i, generator ->
+            if (soloChannels.isEmpty() || soloChannels.contains(i + 1)) {
+                val nextSample = generator.getNextSample()
+                leftSample += nextSample.first
+                rightSample += nextSample.second
+            }
         }
 
         updateCounters()

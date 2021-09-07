@@ -50,17 +50,26 @@ My algorithm aims to do linear interpolation. Here's how it works. First, we per
 
 _(7093789.2 is the clock rate of a PAL Amiga computer - we could also implement this with the NTSC clock rate, which I could include as an option later)_
 
-Next, we need to determine how many samples we will interpolate when given two samples. We can start by dividing the sampling rate by the result of the above formula:
+The instrument audio data is an array of bytes. Typically, we start from the beginning of the audio data. Let's say that's at array index 0. Each time we generate a sample, we will step through the array. We will need to continually add a step value to a counter to track our position. In this example, we initialize the counter at our index. We calculate our step value with the following formula:
 
-    samplesToInterpolate = 44100 / samplesPerSecond
+    step = samplesPerSecond / 44100
 
-This usually does not result in an integer, which means the number of samples to interpolate will not always be the same between iterations. We do a little bit of additional math to figure this out:
+44100 is our sampling rate. So now as we generate samples, we continually add the step value to our counter. We then retrieve the sample from our audio data simply by doing this:
 
-    samplesToInterpolate = floor(44100 / samplesPerSecond)
-    maximumCounterValueForExtraIteration = (44100 - (samplesPerSecond * iterationsPerSample))
+    sample = audioData[floor(counter)]
 
-As we progress through our audio data, we maintain a counter, that starts at 0.0 (yes, it's a double). If the counter is less than the maxCounterValueForExtraIteration, then we increase samplesToInterpolate by one. Otherwise we do not increase it.
+Now, this will not interpolate correctly - if our sample at index 0 is 10, and our step is 0.25, we will just get four values of ten. We need to also calculate our slope and interpolate properly. The formula is:
 
-The purpose of this counter is to maintain smooth interpolation. Every time we produce a new sample, we add the samplesPerSecond to that counter. If the counter is greater than our sampling rate, we subtract the sampling rate from the counter and then stop interpolating the current pair of samples, and then move on to the next pair. We do not reset the counter to 0.0 unless we start playing a new note.
+    rise = nextSample - currentSample
+    stepsPassed = floor((counter - floor(counter)) / step)
+    stepsRemaining = floor((floor(counter) + 1 - counter) / step)
+    run = stepsRemaining + stepsPassed + 1
+    slope = rise / run
+
+Finally, we can use the slope to determine our interpolated sample.
+
+    interpolatedSample = sample + (slope * stepsPassed)
+
+You can see the implementation of this in ChannelAudioGenerator.getInterpolatedSample.
 
 I realize there may be better ways to resample but this is how I'm implementing it for the purposes of this demo, and so far it seems to work.

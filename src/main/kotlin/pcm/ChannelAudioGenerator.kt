@@ -46,23 +46,34 @@ class ChannelAudioGenerator(
         return getStereoSample(volumeAdjustedSample)
     }
 
+    /**
+     * Retrieves a sample and performs linear interpolation. This follows the following steps:
+     *
+     * 1. Get the current sample and the subsequent sample from the audio data.
+     * 2. Determine the rise between the two
+     * 3. Determine the run between the two samples: How many samples we need to interpolate before we will switch to
+     *    the next pair of samples
+     * 4. Calculate the slope - needs to be a double so we can multiply properly
+     * 5. Multiply the slope by our current position in the rise and add to the sample, which is returned as a byte
+     */
     private fun getInterpolatedSample(reference: Double, step: Double): Byte {
-        //get the sample from the current reference
+        // 1: Get sample and subsequent sample from the audio data
         val flooredReference = floor(reference).toInt()
         val sample = activeInstrument.audioData?.get(flooredReference)!!
+        val subsequentSample = getSubsequentSample(activeInstrument, flooredReference)
 
-        //get the next sample from the current reference
-        val rise = getSampleToInterpolate(activeInstrument, flooredReference) - sample
+        // 2: Determine the rise
+        val rise = subsequentSample - sample
 
-        //how do we know how many steps we have traveled since the first step?
+        // 3: Determine the run.
         val stepsSinceFirstStep = floor((reference - flooredReference) / step).toInt()
-
         val remainingSteps = floor((flooredReference + 1 - reference) / step).toInt()
-
         val run = remainingSteps + stepsSinceFirstStep + 1
 
+        // 4: Calculate the slope
         val slope = rise.toDouble() / run.toDouble()
 
+        // 5: Multiply the slop by our current position in the rise and add to the sample, and return
         return (sample + (slope * stepsSinceFirstStep)).roundToInt().toByte()
     }
 
@@ -89,7 +100,13 @@ class ChannelAudioGenerator(
             }
 
             //Only change the volume when an instrument is specified, regardless of whether a period is specified
+            //This will be overwritten if a change volume effect is specified
             currentVolume = activeInstrument.volume
+
+            // If the instrument is changing, we definitely want to reset the audio data reference, unless effect is 3xx
+            if (row.effectNumber != 3) {
+                resamplingState.audioDataReference = 2.0
+            }
         }
 
         if (row.period != 0) {
@@ -104,7 +121,11 @@ class ChannelAudioGenerator(
 
             resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
 
-            resamplingState.audioDataReference = 2.0
+            //reset the audio data reference unless effect is 3xx
+            if (row.effectNumber != 3) {
+                resamplingState.audioDataReference = 2.0
+            }
+
             resamplingState.audioDataStep = resamplingState.samplesPerSecond / SAMPLING_RATE
         }
 
@@ -181,7 +202,8 @@ class ChannelAudioGenerator(
             activeNote.isInstrumentCurrentlyPlaying = false
             activeNote.actualPeriod = 0
         } else if (isInstrumentLooped(activeInstrument) && activeNote.isInstrumentCurrentlyPlaying && resamplingState.audioDataReference.roundToInt() >= activeInstrument.audioData?.size!!) {
-            resamplingState.audioDataReference = (activeInstrument.repeatOffsetStart * 2).toDouble()
+            val referenceRemainder = resamplingState.audioDataReference - floor(resamplingState.audioDataReference)
+            resamplingState.audioDataReference = (activeInstrument.repeatOffsetStart * 2).toDouble() + referenceRemainder
         }
     }
 
@@ -190,7 +212,7 @@ class ChannelAudioGenerator(
      * current sample. If we reach the end of the audio data, we will either return a 0 (for an unlooped instrument) or
      * whatever is at the repeat offset (for a looped instrument)
      */
-    private fun getSampleToInterpolate(instrument: Instrument, currentSamplePosition: Int): Byte {
+    private fun getSubsequentSample(instrument: Instrument, currentSamplePosition: Int): Byte {
         if (currentSamplePosition + 1 >= instrument.audioData?.size!!) {
             if (!isInstrumentLooped(instrument)) {
                 return 0
