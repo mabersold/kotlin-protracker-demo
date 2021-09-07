@@ -46,6 +46,19 @@ class ChannelAudioGenerator(
         return getStereoSample(volumeAdjustedSample)
     }
 
+    fun getNextSample2(): Pair<Byte, Byte> {
+        if (!activeNote.isInstrumentCurrentlyPlaying) {
+            return Pair(0, 0)
+        }
+
+        val actualSample = activeInstrument.audioData?.get(resamplingState.audioDataReference.roundToInt())!!
+        val volumeAdjustedSample = adjustForVolume(actualSample, currentVolume)
+
+        updateResamplingState2()
+
+        return getStereoSample(volumeAdjustedSample)
+    }
+
     /**
      * updates the active row of the current object
      *
@@ -81,11 +94,14 @@ class ChannelAudioGenerator(
             }
 
             activeNote.isInstrumentCurrentlyPlaying = true
-            resamplingState.currentSamplePositionOfInstrument = 2
+            resamplingState.currentSamplePositionOfInstrument = 2 //todo: Is this correct for 3xx effects?
 
             resamplingState.samplesSinceSampleChanged = 0
             resamplingState.sampleProgressCounter = 0.0
             resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
+
+            resamplingState.audioDataReference = 2.0
+            resamplingState.audioDataStep = resamplingState.samplesPerSecond / SAMPLING_RATE
 
             updateCurrentAndNextSamples()
         }
@@ -120,10 +136,12 @@ class ChannelAudioGenerator(
                 val amountToDecreasePeriod = activeNote.effectXValue * 16 + activeNote.effectYValue
                 activeNote.actualPeriod = (activeNote.actualPeriod - amountToDecreasePeriod).coerceAtLeast(activeNote.specifiedPeriod)
                 resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
+                resamplingState.audioDataStep = resamplingState.samplesPerSecond / SAMPLING_RATE
             } else if (activeNote.actualPeriod < activeNote.specifiedPeriod) {
                 val amountToIncreasePeriod = activeNote.effectXValue * 16 + activeNote.effectYValue
                 activeNote.actualPeriod = (activeNote.actualPeriod + amountToIncreasePeriod).coerceAtMost(activeNote.specifiedPeriod)
                 resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
+                resamplingState.audioDataStep = resamplingState.samplesPerSecond / SAMPLING_RATE
             }
         }
     }
@@ -194,6 +212,18 @@ class ChannelAudioGenerator(
         }
     }
 
+    private fun updateResamplingState2() {
+        resamplingState.audioDataReference += resamplingState.audioDataStep
+
+        //If we have exceeded the length of the audio data for an unlooped instrument, we want to stop playing it
+        if (!isInstrumentLooped(activeInstrument) && activeNote.isInstrumentCurrentlyPlaying && resamplingState.audioDataReference.roundToInt() >= activeInstrument.audioData?.size!!) {
+            activeNote.isInstrumentCurrentlyPlaying = false
+            activeNote.actualPeriod = 0
+        } else if (isInstrumentLooped(activeInstrument) && activeNote.isInstrumentCurrentlyPlaying && resamplingState.audioDataReference.roundToInt() >= activeInstrument.audioData?.size!!) {
+            resamplingState.audioDataReference = (activeInstrument.repeatOffsetStart * 2).toDouble()
+        }
+    }
+
     /**
      * Store the next two samples we will compare for resampling purposes - to be called only when we advance through
      * the audio data during the resampling process
@@ -255,7 +285,9 @@ class ChannelAudioGenerator(
         var sampleProgressCounter: Double = 0.0,
         var currentSample: Byte = 0,
         var nextSample: Byte = 0,
-        var slope: Double = 0.0
+        var slope: Double = 0.0,
+        var audioDataReference: Double = 2.0,
+        var audioDataStep: Double = 0.0
     )
 
     data class ActiveNote(
