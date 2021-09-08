@@ -9,18 +9,16 @@ import model.ProTrackerModule
  *
  * Maintains the current position of the module and retrieves and mixes channel audio
  */
-class AudioGenerator(private val module: ProTrackerModule) {
-    val soloChannels = arrayListOf<Int>()
-
+class AudioGenerator(private val module: ProTrackerModule, replacementOrderList: List<Int> = listOf(), private val soloChannels: List<Int> = listOf()) {
     //these will eventually need to be vars since they can be modified by effects, but they can be vals for now
     private val ticksPerRow = 6
     private val beatsPerMinute = 125
-    private val orderList = module.orderList.subList(0, module.numberOfSongPositions.toInt())
+    private val orderList = replacementOrderList.ifEmpty { module.orderList.subList(0, module.numberOfSongPositions.toInt()) }
     private val samplesPerTick = getSamplesPerTick()
 
     private val channelAudioGenerators: ArrayList<ChannelAudioGenerator> = ArrayList()
 
-    private val songPositionState: SongPositionState = SongPositionState(0, 0, 0, 0, module.orderList[0])
+    private val songPositionState: SongPositionState = SongPositionState(0, 0, 0, 0, orderList[0])
 
     companion object {
         private const val SAMPLING_RATE = 44100.0
@@ -67,6 +65,10 @@ class AudioGenerator(private val module: ProTrackerModule) {
      */
     private fun updateRowData() {
         if (isStartOfNewRow(songPositionState)) {
+            if (songPositionState.patternBreakActive) {
+                applyPatternBreak(songPositionState)
+            }
+
             updateRow(songPositionState.currentRowPosition)
         }
     }
@@ -109,7 +111,7 @@ class AudioGenerator(private val module: ProTrackerModule) {
     }
 
     private fun isStartOfNewTick(songPositionState: SongPositionState): Boolean =
-        songStillActive() && songPositionState.currentSamplePosition == 0
+        songStillActive() && songPositionState.currentSamplePosition == 0 && songPositionState.currentTickPosition != 0
 
     private fun isStartOfNewRow(songPositionState: SongPositionState): Boolean =
         songStillActive() && songPositionState.currentTickPosition == 0 && songPositionState.currentSamplePosition == 0
@@ -118,7 +120,17 @@ class AudioGenerator(private val module: ProTrackerModule) {
      * Updates the channel audio generators with new row information - note, effects, and audio data
      */
     private fun updateRow(rowNumber: Int) {
-        songPositionState.currentPatternNumber = module.orderList[songPositionState.currentOrderListPosition]
+        songPositionState.currentPatternNumber = orderList[songPositionState.currentOrderListPosition]
+
+        //If the current row has a pattern break, set pattern break data
+        if (rowHasPatternBreak(module, songPositionState.currentPatternNumber, rowNumber)) {
+            val patternBreakRow = module.patterns[songPositionState.currentPatternNumber].channels.findLast { channel ->
+                channel.rows[rowNumber].effectNumber == 13
+            }?.rows?.get(rowNumber)
+
+            songPositionState.patternBreakActive = true
+            songPositionState.patternBreakStartingRow = patternBreakRow?.effectXValue!! * 10 + patternBreakRow.effectYValue
+        }
 
         //update the active row in the channel audio generators
         channelAudioGenerators.forEachIndexed { i, generator ->
@@ -127,11 +139,26 @@ class AudioGenerator(private val module: ProTrackerModule) {
         }
     }
 
+    private fun applyPatternBreak(songPositionState: SongPositionState) {
+        songPositionState.currentRowPosition = songPositionState.patternBreakStartingRow
+        songPositionState.currentOrderListPosition++
+
+        songPositionState.patternBreakActive = false
+        songPositionState.patternBreakStartingRow = 0
+    }
+
+    private fun rowHasPatternBreak(module: ProTrackerModule, patternNumber: Int, rowNumber: Int): Boolean =
+        module.patterns[patternNumber].channels.any { channel ->
+            channel.rows[rowNumber].effectNumber == 13
+        }
+
     data class SongPositionState(
         var currentOrderListPosition: Int,
         var currentRowPosition: Int,
         var currentTickPosition: Int,
         var currentSamplePosition: Int,
-        var currentPatternNumber: Int
+        var currentPatternNumber: Int,
+        var patternBreakActive: Boolean = false,
+        var patternBreakStartingRow: Int = 0
     )
 }
