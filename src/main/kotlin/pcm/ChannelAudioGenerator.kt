@@ -142,6 +142,11 @@ class ChannelAudioGenerator(
         if (row.effectNumber == 12) {
             currentVolume = (row.effectXValue * 16 + row.effectYValue).coerceAtMost(64).toByte()
         }
+
+        // Apply instrument offset
+        if (row.effectNumber == 9) {
+            resamplingState.audioDataReference = (activeNote.effectXValue * 4096 + activeNote.effectYValue * 256).toDouble()
+        }
     }
 
     /**
