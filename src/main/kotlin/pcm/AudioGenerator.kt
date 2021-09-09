@@ -16,6 +16,7 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
     private val beatsPerMinute = 125
     private val orderList = replacementOrderList.ifEmpty { module.orderList.subList(0, module.numberOfSongPositions.toInt()) }
     private val samplesPerTick = getSamplesPerTick()
+    private val globalEffects = hashMapOf<EffectType, Int>()
 
     private val channelAudioGenerators: ArrayList<ChannelAudioGenerator> = ArrayList()
 
@@ -66,8 +67,13 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
      */
     private fun updateRowData() {
         if (isStartOfNewRow(songPositionState)) {
-            if (songPositionState.patternBreakActive) {
-                applyPatternBreak(songPositionState)
+            if (globalEffects[EffectType.PATTERN_BREAK] != null) {
+                // apply the pattern break
+                songPositionState.currentRowPosition = globalEffects[EffectType.PATTERN_BREAK]!!
+                songPositionState.currentOrderListPosition++
+
+                // Remove the pattern break from the global effects
+                globalEffects.remove(EffectType.PATTERN_BREAK)
             }
 
             updateRow(songPositionState.currentRowPosition)
@@ -133,8 +139,7 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
                 EffectType.PATTERN_BREAK == channel.rows[rowNumber].effect
             }?.rows?.get(rowNumber)
 
-            songPositionState.patternBreakActive = true
-            songPositionState.patternBreakStartingRow = patternBreakRow?.effectXValue!! * 10 + patternBreakRow.effectYValue
+            globalEffects[patternBreakRow?.effect!!] = (patternBreakRow.effectXValue * 10 + patternBreakRow.effectYValue)
         }
 
         //update the active row in the channel audio generators
@@ -142,14 +147,6 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
             val row = module.patterns[songPositionState.currentPatternNumber].channels[i].rows[rowNumber]
             generator.updateActiveRow(row, module.instruments)
         }
-    }
-
-    private fun applyPatternBreak(songPositionState: SongPositionState) {
-        songPositionState.currentRowPosition = songPositionState.patternBreakStartingRow
-        songPositionState.currentOrderListPosition++
-
-        songPositionState.patternBreakActive = false
-        songPositionState.patternBreakStartingRow = 0
     }
 
     private fun rowHasPatternBreak(module: ProTrackerModule, patternNumber: Int, rowNumber: Int): Boolean =
@@ -163,7 +160,5 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         var currentTickPosition: Int,
         var currentSamplePosition: Int,
         var currentPatternNumber: Int,
-        var patternBreakActive: Boolean = false,
-        var patternBreakStartingRow: Int = 0
     )
 }

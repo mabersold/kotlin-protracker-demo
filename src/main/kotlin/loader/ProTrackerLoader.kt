@@ -110,6 +110,8 @@ class ProTrackerLoader {
         val xValue = effect.and(240).shr(4)
         val yValue = effect.and(15)
         val effectType = when(effectNumber) {
+            1 -> EffectType.PITCH_SLIDE_UP
+            2 -> EffectType.PITCH_SLIDE_DOWN
             3 -> EffectType.SLIDE_TO_NOTE
             5 -> EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE
             9 -> EffectType.INSTRUMENT_OFFSET

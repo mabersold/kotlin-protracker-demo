@@ -260,7 +260,7 @@ class ChannelAudioGenerator(
                 row.effectYValue != 0
 
     private fun isPitchSlideEffect(effect: EffectType): Boolean =
-        listOf(EffectType.SLIDE_TO_NOTE).contains(effect)
+        listOf(EffectType.SLIDE_TO_NOTE, EffectType.PITCH_SLIDE_UP, EffectType.PITCH_SLIDE_DOWN).contains(effect)
 
     data class ResamplingState(
         var samplesPerSecond: Double = 0.0,
