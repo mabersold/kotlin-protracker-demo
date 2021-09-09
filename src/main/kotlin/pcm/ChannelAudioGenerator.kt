@@ -54,7 +54,7 @@ class ChannelAudioGenerator(
      * 3. Determine the run between the two samples: How many samples we need to interpolate before we will switch to
      *    the next pair of samples
      * 4. Calculate the slope - needs to be a double so we can multiply properly
-     * 5. Multiply the slope by our current position in the rise and add to the sample, which is returned as a byte
+     * 5. Multiply the slope by our current position in the run and add to the sample, which is returned as a byte
      */
     private fun getInterpolatedSample(reference: Double, step: Double): Byte {
         // 1: Get sample and subsequent sample from the audio data
@@ -73,7 +73,7 @@ class ChannelAudioGenerator(
         // 4: Calculate the slope
         val slope = rise.toDouble() / run.toDouble()
 
-        // 5: Multiply the slop by our current position in the rise and add to the sample, and return
+        // 5: Multiply the slop by our current position in the run and add to the sample, and return
         return (sample + (slope * stepsSinceFirstStep)).roundToInt().toByte()
     }
 
@@ -89,24 +89,27 @@ class ChannelAudioGenerator(
      * if it is present
      */
     fun updateActiveRow(row: Row, instruments: List<Instrument>) {
-        if (row.instrumentNumber != 0 && row.instrumentNumber != activeNote.instrumentNumber) {
-            activeNote.instrumentNumber = row.instrumentNumber
-            activeInstrument = instruments[activeNote.instrumentNumber - 1]
+        if (row.instrumentNumber != 0) {
+            if (row.instrumentNumber != activeNote.instrumentNumber) {
+                activeNote.instrumentNumber = row.instrumentNumber
+                activeInstrument = instruments[activeNote.instrumentNumber - 1]
 
-            // In rare circumstances, an instrument number might be provided without an accompanying note - if this is
-            // a different instrument than the one currently playing, stop playing it.
-            if (row.period == 0) {
-                activeNote.isInstrumentCurrentlyPlaying = false
+                // In rare circumstances, an instrument number might be provided without an accompanying note - if this is
+                // a different instrument than the one currently playing, stop playing it.
+                if (row.period == 0) {
+                    activeNote.isInstrumentCurrentlyPlaying = false
+                }
+
+                // If the instrument is changing, we definitely want to reset the audio data reference, unless effect is 3xx
+                if (row.effectNumber != 3) {
+                    resamplingState.audioDataReference = 2.0
+                }
             }
 
-            //Only change the volume when an instrument is specified, regardless of whether a period is specified
-            //This will be overwritten if a change volume effect is specified
+            // Change the volume when an instrument is specified, regardless of whether a period is specified
+            // This will be overwritten if a change volume effect is specified - do this regardless of whether the instrument
+            // is changing or not
             currentVolume = activeInstrument.volume
-
-            // If the instrument is changing, we definitely want to reset the audio data reference, unless effect is 3xx
-            if (row.effectNumber != 3) {
-                resamplingState.audioDataReference = 2.0
-            }
         }
 
         if (row.period != 0) {
@@ -146,6 +149,19 @@ class ChannelAudioGenerator(
         // Apply instrument offset
         if (row.effectNumber == 9) {
             resamplingState.audioDataReference = (activeNote.effectXValue * 4096 + activeNote.effectYValue * 256).toDouble()
+        }
+    }
+
+    /**
+     * Applies effects that take place only once at the start of a row, before any pcm data has been generated for that row
+     */
+    fun applyStartOfRowEffects() {
+        if (activeNote.effectNumber == 14) {
+            if (activeNote.effectXValue == 10) {
+                currentVolume = (currentVolume + activeNote.effectYValue).coerceAtMost(64).toByte()
+            } else if (activeNote.effectXValue == 11) {
+                currentVolume = (currentVolume - activeNote.effectYValue).coerceAtLeast(0).toByte()
+            }
         }
     }
 
