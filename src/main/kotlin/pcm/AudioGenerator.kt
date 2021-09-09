@@ -1,5 +1,6 @@
 package pcm
 
+import model.EffectType
 import model.ProTrackerModule
 
 /**
@@ -129,7 +130,7 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         //If the current row has a pattern break, set pattern break data
         if (rowHasPatternBreak(module, songPositionState.currentPatternNumber, rowNumber)) {
             val patternBreakRow = module.patterns[songPositionState.currentPatternNumber].channels.findLast { channel ->
-                channel.rows[rowNumber].effectNumber == 13
+                EffectType.PATTERN_BREAK == channel.rows[rowNumber].effect
             }?.rows?.get(rowNumber)
 
             songPositionState.patternBreakActive = true
@@ -153,7 +154,7 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
 
     private fun rowHasPatternBreak(module: ProTrackerModule, patternNumber: Int, rowNumber: Int): Boolean =
         module.patterns[patternNumber].channels.any { channel ->
-            channel.rows[rowNumber].effectNumber == 13
+            EffectType.PATTERN_BREAK == channel.rows[rowNumber].effect
         }
 
     data class SongPositionState(

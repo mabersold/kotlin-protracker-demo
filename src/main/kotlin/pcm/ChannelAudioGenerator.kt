@@ -1,5 +1,6 @@
 package pcm
 
+import model.EffectType
 import model.Instrument
 import model.PanningPosition
 import model.Row
@@ -101,7 +102,7 @@ class ChannelAudioGenerator(
                 }
 
                 // If the instrument is changing, we definitely want to reset the audio data reference, unless effect is 3xx
-                if (row.effectNumber != 3) {
+                if (EffectType.SLIDE_TO_NOTE != row.effect) {
                     resamplingState.audioDataReference = 2.0
                 }
             }
@@ -116,7 +117,7 @@ class ChannelAudioGenerator(
             // if the new row has a note indicated, we need to change the active period to the new active period and reset the instrument sampling position
             activeNote.specifiedPeriod = row.period
 
-            if (row.effectNumber != 3) {
+            if (EffectType.SLIDE_TO_NOTE != row.effect) {
                 activeNote.actualPeriod = row.period
             }
 
@@ -125,7 +126,7 @@ class ChannelAudioGenerator(
             resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
 
             //reset the audio data reference unless effect is 3xx
-            if (row.effectNumber != 3) {
+            if (EffectType.SLIDE_TO_NOTE != row.effect) {
                 resamplingState.audioDataReference = 2.0
             }
 
@@ -137,17 +138,17 @@ class ChannelAudioGenerator(
             activeNote.effectYValue = row.effectYValue
         }
 
-        if (row.effectNumber != activeNote.effectNumber) {
-            activeNote.effectNumber = row.effectNumber
+        if (row.effect != activeNote.effect) {
+            activeNote.effect = row.effect
         }
 
         // A change volume effect can take place without a new note effect
-        if (row.effectNumber == 12) {
+        if (EffectType.SET_VOLUME == row.effect) {
             currentVolume = (row.effectXValue * 16 + row.effectYValue).coerceAtMost(64).toByte()
         }
 
         // Apply instrument offset
-        if (row.effectNumber == 9) {
+        if (EffectType.INSTRUMENT_OFFSET == row.effect) {
             resamplingState.audioDataReference = (activeNote.effectXValue * 4096 + activeNote.effectYValue * 256).toDouble()
         }
     }
@@ -156,12 +157,12 @@ class ChannelAudioGenerator(
      * Applies effects that take place only once at the start of a row, before any pcm data has been generated for that row
      */
     fun applyStartOfRowEffects() {
-        if (activeNote.effectNumber == 14) {
-            if (activeNote.effectXValue == 10) {
-                currentVolume = (currentVolume + activeNote.effectYValue).coerceAtMost(64).toByte()
-            } else if (activeNote.effectXValue == 11) {
-                currentVolume = (currentVolume - activeNote.effectYValue).coerceAtLeast(0).toByte()
-            }
+        currentVolume = when(activeNote.effect) {
+            EffectType.FINE_VOLUME_SLIDE_UP ->
+                (currentVolume + activeNote.effectYValue).coerceAtMost(64).toByte()
+            EffectType.FINE_VOLUME_SLIDE_DOWN ->
+                (currentVolume - activeNote.effectYValue).coerceAtLeast(0).toByte()
+            else -> currentVolume
         }
     }
 
@@ -169,13 +170,13 @@ class ChannelAudioGenerator(
      * Some effect commands take place for every tick. This function invokes those effects.
      */
     fun applyPerTickEffects() {
-        if (activeNote.effectNumber == 10) {
+        if (EffectType.VOLUME_SLIDE == activeNote.effect) {
             currentVolume = if (activeNote.effectXValue > 0) {
                 (activeNote.effectXValue + currentVolume).coerceAtMost(64).toByte()
             } else {
                 (currentVolume - activeNote.effectYValue).coerceAtLeast(0).toByte()
             }
-        } else if (activeNote.effectNumber == 3) {
+        } else if (EffectType.SLIDE_TO_NOTE == activeNote.effect) {
             if (activeNote.actualPeriod > activeNote.specifiedPeriod) {
                 val amountToDecreasePeriod = activeNote.effectXValue * 16 + activeNote.effectYValue
                 activeNote.actualPeriod = (activeNote.actualPeriod - amountToDecreasePeriod).coerceAtLeast(activeNote.specifiedPeriod)
@@ -253,10 +254,13 @@ class ChannelAudioGenerator(
         instrument.repeatLength > 1
 
     private fun shouldUpdateEffectParameters(row: Row, activeNote: ActiveNote) =
-        row.effectNumber != activeNote.effectNumber ||
-                !listOf(1, 2, 3).contains(row.effectNumber) ||
+        row.effect != activeNote.effect ||
+                !isPitchSlideEffect(row.effect) ||
                 row.effectXValue != 0 ||
                 row.effectYValue != 0
+
+    private fun isPitchSlideEffect(effect: EffectType): Boolean =
+        listOf(EffectType.SLIDE_TO_NOTE).contains(effect)
 
     data class ResamplingState(
         var samplesPerSecond: Double = 0.0,
@@ -270,6 +274,7 @@ class ChannelAudioGenerator(
         var specifiedPeriod: Int = 0,
         var instrumentNumber: Int = 0,
         var effectNumber: Int = 0,
+        var effect: EffectType = EffectType.UNKNOWN_OR_UNIMPLEMENTED_EFFECT,
         var effectXValue: Int = 0,
         var effectYValue: Int = 0
     )

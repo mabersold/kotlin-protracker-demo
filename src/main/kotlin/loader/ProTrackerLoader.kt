@@ -1,4 +1,7 @@
+package loader
+
 import model.Channel
+import model.EffectType
 import model.Pattern
 import model.ProTrackerModule
 import model.Row
@@ -106,8 +109,23 @@ class ProTrackerLoader {
         val effectNumber = effect.and(3840).shr(8)
         val xValue = effect.and(240).shr(4)
         val yValue = effect.and(15)
-
-        return Row(instrumentNumber, period, effectNumber, xValue, yValue)
+        val effectType = when(effectNumber) {
+            3 -> EffectType.SLIDE_TO_NOTE
+            5 -> EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE
+            9 -> EffectType.INSTRUMENT_OFFSET
+            10 -> EffectType.VOLUME_SLIDE
+            12 -> EffectType.SET_VOLUME
+            13 -> EffectType.PATTERN_BREAK
+            14 -> {
+                when(xValue) {
+                    10 -> EffectType.FINE_VOLUME_SLIDE_UP
+                    11 -> EffectType.FINE_VOLUME_SLIDE_DOWN
+                    else -> EffectType.UNKNOWN_OR_UNIMPLEMENTED_EFFECT
+                }
+            }
+            else -> EffectType.UNKNOWN_OR_UNIMPLEMENTED_EFFECT
+        }
+        return Row(instrumentNumber, period, effectType, xValue, yValue)
     }
 
     private fun signedNibble(data: Byte): Byte {
