@@ -70,6 +70,10 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
             }
 
             updateRow(songPositionState.currentRowPosition)
+
+            channelAudioGenerators.forEach { generator ->
+                generator.applyStartOfRowEffects()
+            }
         }
     }
 
