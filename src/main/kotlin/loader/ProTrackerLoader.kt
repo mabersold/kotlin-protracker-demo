@@ -122,10 +122,10 @@ class ProTrackerLoader {
                 when(xValue) {
                     10 -> EffectType.FINE_VOLUME_SLIDE_UP
                     11 -> EffectType.FINE_VOLUME_SLIDE_DOWN
-                    else -> EffectType.UNKNOWN_OR_UNIMPLEMENTED_EFFECT
+                    else -> EffectType.UNKNOWN_EFFECT
                 }
             }
-            else -> EffectType.UNKNOWN_OR_UNIMPLEMENTED_EFFECT
+            else -> EffectType.UNKNOWN_EFFECT
         }
         return Row(instrumentNumber, period, effectType, xValue, yValue)
     }

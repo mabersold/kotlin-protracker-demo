@@ -133,7 +133,9 @@ class ChannelAudioGenerator(
             resamplingState.audioDataStep = resamplingState.samplesPerSecond / SAMPLING_RATE
         }
 
-        if (shouldUpdateEffectParameters(row, activeNote)) {
+        if (EffectType.SLIDE_TO_NOTE == row.effect && (row.effectXValue != 0 || row.effectYValue != 0)) {
+            activeNote.slideToNoteSpeed = row.effectXValue * 16 + row.effectYValue
+        } else {
             activeNote.effectXValue = row.effectXValue
             activeNote.effectYValue = row.effectYValue
         }
@@ -170,24 +172,16 @@ class ChannelAudioGenerator(
      * Some effect commands take place for every tick. This function invokes those effects.
      */
     fun applyPerTickEffects() {
-        if (EffectType.VOLUME_SLIDE == activeNote.effect) {
-            currentVolume = if (activeNote.effectXValue > 0) {
-                (activeNote.effectXValue + currentVolume).coerceAtMost(64).toByte()
-            } else {
-                (currentVolume - activeNote.effectYValue).coerceAtLeast(0).toByte()
+        when (activeNote.effect) {
+            EffectType.VOLUME_SLIDE ->
+                currentVolume = applyVolumeSlideAdjustment(activeNote.effectXValue, activeNote.effectYValue, currentVolume)
+            EffectType.SLIDE_TO_NOTE ->
+                applySlideToNoteAdjustment()
+            EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE -> {
+                currentVolume = applyVolumeSlideAdjustment(activeNote.effectXValue, activeNote.effectYValue, currentVolume)
+                applySlideToNoteAdjustment()
             }
-        } else if (EffectType.SLIDE_TO_NOTE == activeNote.effect) {
-            if (activeNote.actualPeriod > activeNote.specifiedPeriod) {
-                val amountToDecreasePeriod = activeNote.effectXValue * 16 + activeNote.effectYValue
-                activeNote.actualPeriod = (activeNote.actualPeriod - amountToDecreasePeriod).coerceAtLeast(activeNote.specifiedPeriod)
-                resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
-                resamplingState.audioDataStep = resamplingState.samplesPerSecond / SAMPLING_RATE
-            } else if (activeNote.actualPeriod < activeNote.specifiedPeriod) {
-                val amountToIncreasePeriod = activeNote.effectXValue * 16 + activeNote.effectYValue
-                activeNote.actualPeriod = (activeNote.actualPeriod + amountToIncreasePeriod).coerceAtMost(activeNote.specifiedPeriod)
-                resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
-                resamplingState.audioDataStep = resamplingState.samplesPerSecond / SAMPLING_RATE
-            }
+            else -> return
         }
     }
 
@@ -253,14 +247,24 @@ class ChannelAudioGenerator(
     private fun isInstrumentLooped(instrument: Instrument) =
         instrument.repeatLength > 1
 
-    private fun shouldUpdateEffectParameters(row: Row, activeNote: ActiveNote) =
-        row.effect != activeNote.effect ||
-                !isPitchSlideEffect(row.effect) ||
-                row.effectXValue != 0 ||
-                row.effectYValue != 0
+    private fun applyVolumeSlideAdjustment(xValue: Int, yValue: Int, volume: Byte) =
+        if (xValue > 0) {
+            (xValue + volume).coerceAtMost(64).toByte()
+        } else {
+            (volume - yValue).coerceAtLeast(0).toByte()
+        }
 
-    private fun isPitchSlideEffect(effect: EffectType): Boolean =
-        listOf(EffectType.SLIDE_TO_NOTE, EffectType.PITCH_SLIDE_UP, EffectType.PITCH_SLIDE_DOWN).contains(effect)
+    private fun applySlideToNoteAdjustment() {
+        if (activeNote.actualPeriod > activeNote.specifiedPeriod) {
+            activeNote.actualPeriod = (activeNote.actualPeriod - activeNote.slideToNoteSpeed).coerceAtLeast(activeNote.specifiedPeriod)
+            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
+            resamplingState.audioDataStep = resamplingState.samplesPerSecond / SAMPLING_RATE
+        } else if (activeNote.actualPeriod < activeNote.specifiedPeriod) {
+            activeNote.actualPeriod = (activeNote.actualPeriod + activeNote.slideToNoteSpeed).coerceAtMost(activeNote.specifiedPeriod)
+            resamplingState.samplesPerSecond = getSamplesPerSecond(activeNote.actualPeriod)
+            resamplingState.audioDataStep = resamplingState.samplesPerSecond / SAMPLING_RATE
+        }
+    }
 
     data class ResamplingState(
         var samplesPerSecond: Double = 0.0,
@@ -274,8 +278,9 @@ class ChannelAudioGenerator(
         var specifiedPeriod: Int = 0,
         var instrumentNumber: Int = 0,
         var effectNumber: Int = 0,
-        var effect: EffectType = EffectType.UNKNOWN_OR_UNIMPLEMENTED_EFFECT,
+        var effect: EffectType = EffectType.UNKNOWN_EFFECT,
         var effectXValue: Int = 0,
-        var effectYValue: Int = 0
+        var effectYValue: Int = 0,
+        var slideToNoteSpeed: Int = 0
     )
 }
