@@ -18,7 +18,7 @@ class ChannelAudioGenerator(
 ) {
     private val activeNote = ActiveNote()
     private val resamplingState = ResamplingState()
-    private var vibratoState: VibratoEffectState = VibratoEffectState()
+    private var effectState: EffectState = EffectState()
     private lateinit var activeInstrument: Instrument
     private var currentVolume: Byte = 0
     var beatsPerMinute: Int = 125
@@ -44,10 +44,10 @@ class ChannelAudioGenerator(
             return Pair(0, 0)
         }
 
-        if (vibratoState.isActive) {
-            val cyclePosition = vibratoState.samplesElapsed / vibratoState.samplesPerCyclePosition
+        if (effectState.vibrato?.isActive == true) {
+            val cyclePosition = effectState.vibrato!!.samplesElapsed / effectState.vibrato!!.samplesPerCyclePosition
             val sineTableValue = SINE_TABLE[floor(cyclePosition).roundToInt()]
-            val depthAdjustment = sineTableValue * vibratoState.depth / 128
+            val depthAdjustment = sineTableValue * effectState.vibrato!!.depth / 128
             if (activeNote.actualPeriod != activeNote.specifiedPeriod + depthAdjustment) {
                 activeNote.actualPeriod = activeNote.specifiedPeriod + depthAdjustment
                 resamplingState.audioDataStep = getSamplesPerSecond(activeNote.actualPeriod) / SAMPLING_RATE
@@ -59,10 +59,10 @@ class ChannelAudioGenerator(
 
         updateResamplingState()
 
-        if (vibratoState.isActive) {
-            vibratoState.samplesElapsed++
-            if (vibratoState.samplesElapsed >= vibratoState.samplesPerCycle) {
-                vibratoState.samplesElapsed = 0
+        if (effectState.vibrato != null) {
+            effectState.vibrato!!.samplesElapsed++
+            if (effectState.vibrato!!.samplesElapsed >= effectState.vibrato!!.samplesPerCycle) {
+                effectState.vibrato!!.samplesElapsed = 0
             }
         }
 
@@ -159,11 +159,7 @@ class ChannelAudioGenerator(
             activeNote.effectYValue = row.effectYValue
         }
 
-        vibratoState = if (EffectType.VIBRATO == row.effect) {
-            getVibratoEffectState(row.effectXValue, row.effectYValue, vibratoState)
-        } else {
-            VibratoEffectState(isActive = false)
-        }
+        effectState = getEffectState(row.effect, row.effectXValue, row.effectYValue, effectState)
 
         if (row.effect != activeNote.effect) {
             activeNote.effect = row.effect
@@ -289,19 +285,34 @@ class ChannelAudioGenerator(
         }
     }
 
-    private fun getVibratoEffectState(xValue: Int, yValue: Int, previousVibratoState: VibratoEffectState): VibratoEffectState {
-        //if the current vibrato effect state is already active, don't reset the samples elapsed counter
-        val samplesElapsed = if (previousVibratoState.isActive) previousVibratoState.samplesElapsed else 0
+    private fun getEffectState(effectType: EffectType, xValue: Int, yValue: Int, previousEffectState: EffectState): EffectState {
+        val effectState = EffectState()
+        effectState.vibrato = previousEffectState.vibrato
+        effectState.vibrato?.isActive = false
 
-        val cyclesPerRow = if (xValue == 0) previousVibratoState.cyclesPerRow else xValue * ticksPerRow / 64.0
-        val depth = if (yValue == 0) previousVibratoState.depth else yValue
+        when (effectType) {
+            EffectType.VIBRATO -> {
+                effectState.vibrato = getVibratoEffectState(xValue, yValue, previousEffectState.vibrato)
+            }
+            else -> {}
+        }
+
+        return effectState
+    }
+
+    private fun getVibratoEffectState(xValue: Int, yValue: Int, previousVibratoState: VibratoState?): VibratoState {
+        //if the current vibrato effect state is already active, don't reset the samples elapsed counter
+        val samplesElapsed = if (previousVibratoState?.isActive == true) previousVibratoState.samplesElapsed else 0
+
+        val cyclesPerRow = if (xValue == 0) previousVibratoState?.cyclesPerRow!! else xValue * ticksPerRow / 64.0
+        val depth = if (yValue == 0) previousVibratoState?.depth!! else yValue
 
         val samplesPerRow = (SAMPLING_RATE / (beatsPerMinute / 60.0)) / 4
 
-        val samplesPerCycle = samplesPerRow * cyclesPerRow.pow(-1)
+        val samplesPerCycle = samplesPerRow * (cyclesPerRow.pow(-1) ?: 0.0)
         val samplesPerCyclePosition = samplesPerCycle / 64
 
-        return VibratoEffectState(cyclesPerRow, depth, samplesPerCyclePosition, samplesPerCycle, samplesElapsed, true)
+        return VibratoState(cyclesPerRow, depth, samplesPerCyclePosition, samplesPerCycle, samplesElapsed, true)
     }
 
     data class ResamplingState(
@@ -321,7 +332,12 @@ class ChannelAudioGenerator(
         var slideToNoteSpeed: Int = 0
     )
 
-    data class VibratoEffectState(
+    data class EffectState(
+        var effectType: EffectType = EffectType.UNKNOWN_EFFECT,
+        var vibrato: VibratoState? = null
+    )
+
+    data class VibratoState(
         var cyclesPerRow: Double = 0.0,
         var depth: Int = 0,
         var samplesPerCyclePosition: Double = 0.0,
