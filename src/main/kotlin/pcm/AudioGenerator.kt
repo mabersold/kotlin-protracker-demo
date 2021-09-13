@@ -28,8 +28,11 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
 
     init {
         //Generate channel audio generators for each channel in the module
-        module.patterns[songPositionState.currentPatternNumber].channels.forEachIndexed { i, channel ->
-            channelAudioGenerators.add(ChannelAudioGenerator(channel.panningPosition))
+        module.patterns[songPositionState.currentPatternNumber].channels.forEach { channel ->
+            val channelAudioGenerator = ChannelAudioGenerator(channel.panningPosition)
+            channelAudioGenerator.beatsPerMinute = this.beatsPerMinute
+            channelAudioGenerator.ticksPerRow = this.ticksPerRow
+            channelAudioGenerators.add(channelAudioGenerator)
         }
     }
 
