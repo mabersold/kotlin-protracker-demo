@@ -2,6 +2,7 @@ package pcm
 
 import model.EffectType
 import model.ProTrackerModule
+import model.Row
 
 /**
  * AudioGenerator - manages audio generation for the entire module
@@ -11,9 +12,8 @@ import model.ProTrackerModule
  * Maintains the current position of the module and retrieves and mixes channel audio
  */
 class AudioGenerator(private val module: ProTrackerModule, replacementOrderList: List<Int> = listOf(), private val soloChannels: List<Int> = listOf()) {
-    //these will eventually need to be vars since they can be modified by effects, but they can be vals for now
-    private val ticksPerRow = 6
-    private val beatsPerMinute = 125
+    private var ticksPerRow = 6
+    private var beatsPerMinute = 125
     private val orderList = replacementOrderList.ifEmpty { module.orderList.subList(0, module.numberOfSongPositions.toInt()) }
     private val samplesPerTick = getSamplesPerTick()
     private val globalEffects = hashMapOf<EffectType, Int>()
@@ -56,7 +56,7 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
             }
         }
 
-        updateCounters()
+        updateSongPosition()
         applyPerTickEffects()
 
         return Pair(
@@ -69,27 +69,29 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
      * If we are at the start of a new row, update the channel audio generators with new row data
      */
     private fun updateRowData() {
-        if (isStartOfNewRow(songPositionState)) {
-            if (globalEffects[EffectType.PATTERN_BREAK] != null) {
-                // apply the pattern break
-                songPositionState.currentRowPosition = globalEffects[EffectType.PATTERN_BREAK]!!
-                songPositionState.currentOrderListPosition++
+        if (!isStartOfNewRow(songPositionState)) {
+            return
+        }
 
-                // Remove the pattern break from the global effects
-                globalEffects.remove(EffectType.PATTERN_BREAK)
-            }
+        if (globalEffects[EffectType.PATTERN_BREAK] != null) {
+            // apply the pattern break
+            songPositionState.currentRowPosition = globalEffects[EffectType.PATTERN_BREAK]!!
+            songPositionState.currentOrderListPosition++
 
-            updateRow(songPositionState.currentRowPosition)
+            // Remove the pattern break from the global effects
+            globalEffects.remove(EffectType.PATTERN_BREAK)
+        }
 
-            channelAudioGenerators.forEachIndexed { i, generator ->
-                if (currentChannelIsPlaying(i)) {
-                    generator.applyStartOfRowEffects()
-                }
+        updateRow(songPositionState.currentRowPosition)
+
+        channelAudioGenerators.forEachIndexed { i, generator ->
+            if (currentChannelIsPlaying(i)) {
+                generator.applyStartOfRowEffects()
             }
         }
     }
 
-    private fun updateCounters() {
+    private fun updateSongPosition() {
         songPositionState.currentSamplePosition++
 
         //if samplePosition > samples per tick, go to the next tick
@@ -112,11 +114,13 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
     }
 
     private fun applyPerTickEffects() {
-        if (isStartOfNewTick(songPositionState)) {
-            channelAudioGenerators.forEachIndexed { i, generator ->
-                if (currentChannelIsPlaying(i)) {
-                    generator.applyPerTickEffects()
-                }
+        if (!isStartOfNewTick(songPositionState)) {
+            return
+        }
+
+        channelAudioGenerators.forEachIndexed { i, generator ->
+            if (currentChannelIsPlaying(i)) {
+                generator.applyPerTickEffects()
             }
         }
     }
@@ -141,12 +145,13 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         songPositionState.currentPatternNumber = orderList[songPositionState.currentOrderListPosition]
 
         //If the current row has a pattern break, set pattern break data
-        if (rowHasPatternBreak(module, songPositionState.currentPatternNumber, rowNumber)) {
-            val patternBreakRow = module.patterns[songPositionState.currentPatternNumber].channels.findLast { channel ->
-                EffectType.PATTERN_BREAK == channel.rows[rowNumber].effect
-            }?.rows?.get(rowNumber)
-
+        if (rowHasGlobalEffect(EffectType.PATTERN_BREAK, module, songPositionState.currentPatternNumber, rowNumber)) {
+            val patternBreakRow = getRowWithGlobalEffect(rowNumber, EffectType.PATTERN_BREAK, songPositionState.currentPatternNumber, module)
             globalEffects[patternBreakRow?.effect!!] = (patternBreakRow.effectXValue * 10 + patternBreakRow.effectYValue)
+        }
+
+        if (rowHasGlobalEffect(EffectType.CHANGE_SPEED, module, songPositionState.currentPatternNumber, rowNumber)) {
+            applySpeedChange(rowNumber)
         }
 
         //update the active row in the channel audio generators
@@ -158,10 +163,32 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         }
     }
 
-    private fun rowHasPatternBreak(module: ProTrackerModule, patternNumber: Int, rowNumber: Int): Boolean =
-        module.patterns[patternNumber].channels.any { channel ->
-            EffectType.PATTERN_BREAK == channel.rows[rowNumber].effect
+    private fun applySpeedChange(rowNumber: Int) {
+        val speedChangeRow = getRowWithGlobalEffect(rowNumber, EffectType.CHANGE_SPEED, songPositionState.currentPatternNumber, module)
+
+        val speedChange = speedChangeRow?.effectXValue!! * 16 + speedChangeRow.effectYValue
+        if (speedChange < 32) {
+            this.ticksPerRow = speedChange
+            channelAudioGenerators.forEach { generator ->
+                generator.ticksPerRow = speedChange
+            }
+        } else {
+            this.beatsPerMinute = speedChange
+            channelAudioGenerators.forEach { generator ->
+                generator.beatsPerMinute = speedChange
+            }
         }
+    }
+
+    private fun rowHasGlobalEffect(effect: EffectType, module: ProTrackerModule, patternNumber: Int, rowNumber: Int): Boolean =
+        module.patterns[patternNumber].channels.any { channel ->
+            effect == channel.rows[rowNumber].effect
+        }
+
+    private fun getRowWithGlobalEffect(rowNumber: Int, effect: EffectType, patternNumber: Int, module: ProTrackerModule): Row? =
+        module.patterns[patternNumber].channels.findLast { channel ->
+            effect == channel.rows[rowNumber].effect
+        }?.rows?.get(rowNumber)
 
     private fun currentChannelIsPlaying(channelNumber: Int): Boolean =
         soloChannels.isEmpty() || soloChannels.contains(channelNumber)
