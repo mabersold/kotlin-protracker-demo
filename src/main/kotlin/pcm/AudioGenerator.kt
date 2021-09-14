@@ -49,7 +49,7 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         var rightSample = 0
 
         channelAudioGenerators.forEachIndexed { i, generator ->
-            if (soloChannels.isEmpty() || soloChannels.contains(i + 1)) {
+            if (currentChannelIsPlaying(i)) {
                 val nextSample = generator.getNextSample()
                 leftSample += nextSample.first
                 rightSample += nextSample.second
@@ -81,8 +81,10 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
 
             updateRow(songPositionState.currentRowPosition)
 
-            channelAudioGenerators.forEach { generator ->
-                generator.applyStartOfRowEffects()
+            channelAudioGenerators.forEachIndexed { i, generator ->
+                if (currentChannelIsPlaying(i)) {
+                    generator.applyStartOfRowEffects()
+                }
             }
         }
     }
@@ -111,8 +113,10 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
 
     private fun applyPerTickEffects() {
         if (isStartOfNewTick(songPositionState)) {
-            channelAudioGenerators.forEach { generator ->
-                generator.applyPerTickEffects()
+            channelAudioGenerators.forEachIndexed { i, generator ->
+                if (currentChannelIsPlaying(i)) {
+                    generator.applyPerTickEffects()
+                }
             }
         }
     }
@@ -147,8 +151,10 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
 
         //update the active row in the channel audio generators
         channelAudioGenerators.forEachIndexed { i, generator ->
-            val row = module.patterns[songPositionState.currentPatternNumber].channels[i].rows[rowNumber]
-            generator.updateActiveRow(row, module.instruments)
+            if (currentChannelIsPlaying(i))  {
+                val row = module.patterns[songPositionState.currentPatternNumber].channels[i].rows[rowNumber]
+                generator.updateActiveRow(row, module.instruments)
+            }
         }
     }
 
@@ -156,6 +162,9 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         module.patterns[patternNumber].channels.any { channel ->
             EffectType.PATTERN_BREAK == channel.rows[rowNumber].effect
         }
+
+    private fun currentChannelIsPlaying(channelNumber: Int): Boolean =
+        soloChannels.isEmpty() || soloChannels.contains(channelNumber)
 
     data class SongPositionState(
         var currentOrderListPosition: Int,
