@@ -113,6 +113,7 @@ class ProTrackerLoader {
             1 -> EffectType.PITCH_SLIDE_UP
             2 -> EffectType.PITCH_SLIDE_DOWN
             3 -> EffectType.SLIDE_TO_NOTE
+            4 -> EffectType.VIBRATO
             5 -> EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE
             9 -> EffectType.INSTRUMENT_OFFSET
             10 -> EffectType.VOLUME_SLIDE
@@ -135,10 +136,10 @@ class ProTrackerLoader {
         val nibble = data.and(15)
 
         //if first bit is 1, it's a negative number
-        if (nibble.and(8) == 8.toByte() ) {
-            return (nibble - 16).toByte()
+        return if (nibble.and(8) == 8.toByte() ) {
+            (nibble - 16).toByte()
         } else {
-            return nibble
+            nibble
         }
     }
 }
