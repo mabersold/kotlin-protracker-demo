@@ -126,6 +126,7 @@ class ProTrackerLoader {
                     else -> EffectType.UNKNOWN_EFFECT
                 }
             }
+            15 -> EffectType.CHANGE_SPEED
             else -> EffectType.UNKNOWN_EFFECT
         }
         return Row(instrumentNumber, period, effectType, xValue, yValue)

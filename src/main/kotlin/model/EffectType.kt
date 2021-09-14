@@ -12,5 +12,6 @@ enum class EffectType {
     PATTERN_BREAK,
     FINE_VOLUME_SLIDE_UP,
     FINE_VOLUME_SLIDE_DOWN,
+    CHANGE_SPEED,
     UNKNOWN_EFFECT
 }

@@ -182,6 +182,18 @@ class ChannelAudioGenerator(
             }
             EffectType.VOLUME_SLIDE ->
                 currentVolume = applyVolumeSlideAdjustment(effectState.xValue, effectState.yValue, currentVolume)
+            EffectType.PITCH_SLIDE_UP -> {
+                val periodAdjustment = effectState.xValue * 16 + effectState.yValue
+                activeNote.actualPeriod = (activeNote.actualPeriod - periodAdjustment).coerceAtLeast(113)
+                activeNote.specifiedPeriod = activeNote.actualPeriod
+                resamplingState.audioDataStep = getSamplesPerSecond(activeNote.actualPeriod) / SAMPLING_RATE
+            }
+            EffectType.PITCH_SLIDE_DOWN -> {
+                val periodAdjustment = effectState.xValue * 16 + effectState.yValue
+                activeNote.actualPeriod = (activeNote.actualPeriod + periodAdjustment).coerceAtMost(856)
+                activeNote.specifiedPeriod = activeNote.actualPeriod
+                resamplingState.audioDataStep = getSamplesPerSecond(activeNote.actualPeriod) / SAMPLING_RATE
+            }
 
             else -> return
         }
@@ -272,10 +284,10 @@ class ChannelAudioGenerator(
     private fun getEffectState(effectType: EffectType, xValue: Int, yValue: Int, previousEffectState: EffectState): EffectState {
         val effectState = EffectState()
         effectState.vibrato = previousEffectState.vibrato
+        effectState.slideToNote = previousEffectState.slideToNote
         effectState.effectType = effectType
         effectState.xValue = xValue
         effectState.yValue = yValue
-        effectState.slideToNote = previousEffectState.slideToNote
 
         when (effectType) {
             EffectType.SLIDE_TO_NOTE -> {
