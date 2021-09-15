@@ -59,58 +59,11 @@ class ChannelAudioGenerator(
     }
 
     /**
-     * updates the active row of the current object
-     *
-     * receives a row and a list of instruments
-     *
-     * If we are to play a new note, update the active note data and resampling state. A new note is indicated by if the
-     * provided row has a period of anything other than zero.
-     *
-     * Note that not every row with a period will have an instrument number specified, so only update the instrument number
-     * if it is present
+     * Handles new row data during playback - when a new row is provided, it updates the instrument, period, and effect
      */
-    fun updateActiveRow(row: Row, instruments: List<Instrument>) {
-        if (row.instrumentNumber != 0) {
-            if (row.instrumentNumber != activeNote.instrumentNumber) {
-                activeNote.instrumentNumber = row.instrumentNumber
-                activeInstrument = instruments[activeNote.instrumentNumber - 1]
-                resampler.instrument = instruments[activeNote.instrumentNumber - 1]
-
-                // In rare circumstances, an instrument number might be provided without an accompanying note - if this is
-                // a different instrument than the one currently playing, stop playing it.
-                if (row.period == 0) {
-                    activeNote.isInstrumentCurrentlyPlaying = false
-                }
-
-                // If the instrument is changing, we definitely want to reset the audio data reference, unless effect is 3xx
-                if (EffectType.SLIDE_TO_NOTE != row.effect) {
-                    resampler.audioDataReference = 2.0
-                }
-            }
-
-            // Change the volume when an instrument is specified, regardless of whether a period is specified
-            // This will be overwritten if a change volume effect is specified - do this regardless of whether the instrument
-            // is changing or not
-            currentVolume = activeInstrument.volume
-        }
-
-        if (row.period != 0) {
-            // if the new row has a note indicated, we need to change the active period to the new active period and reset the instrument sampling position
-            activeNote.specifiedPeriod = row.period
-
-            if (EffectType.SLIDE_TO_NOTE != row.effect) {
-                activeNote.actualPeriod = row.period
-            }
-
-            activeNote.isInstrumentCurrentlyPlaying = true
-            resampler.recalculateStep(activeNote.actualPeriod, SAMPLING_RATE)
-
-            //reset the audio data reference unless effect is 3xx
-            if (EffectType.SLIDE_TO_NOTE != row.effect) {
-                resampler.audioDataReference = 2.0
-            }
-        }
-
+    fun setNextRow(row: Row, instruments: List<Instrument>) {
+        updateInstrument(row, instruments)
+        updatePeriod(row)
         effectState = getEffectState(row.effect, row.effectXValue, row.effectYValue, effectState)
     }
 
@@ -158,9 +111,52 @@ class ChannelAudioGenerator(
                 activeNote.specifiedPeriod = activeNote.actualPeriod
                 resampler.recalculateStep(activeNote.actualPeriod, SAMPLING_RATE)
             }
-
             else -> return
         }
+    }
+
+    private fun updateInstrument(row: Row, instruments: List<Instrument>) {
+        if (row.instrumentNumber == 0) {
+            return
+        }
+
+        if (row.instrumentNumber != activeNote.instrumentNumber) {
+            activeNote.instrumentNumber = row.instrumentNumber
+            activeInstrument = instruments[activeNote.instrumentNumber - 1]
+            resampler.instrument = instruments[activeNote.instrumentNumber - 1]
+
+            // In rare circumstances, an instrument number might be provided without an accompanying note - if this is
+            // a different instrument than the one currently playing, stop playing it.
+            if (row.period == 0) {
+                activeNote.isInstrumentCurrentlyPlaying = false
+            }
+
+            // If the instrument is changing, we definitely want to reset the audio data reference, unless effect is 3xx
+            if (EffectType.SLIDE_TO_NOTE != row.effect) {
+                resampler.audioDataReference = 2.0
+            }
+        }
+
+        // Specifying instrument number always updates the volume, even if no period is specified
+        currentVolume = activeInstrument.volume
+    }
+
+    private fun updatePeriod(row: Row) {
+        if (row.period == 0) {
+            return
+        }
+
+        // if the new row has a note indicated, we need to change the active period to the new active period and reset the instrument sampling position
+        activeNote.specifiedPeriod = row.period
+
+        //a slide to note effect will not reset the position of the audio data reference or cause us to immediately change the period
+        if (!listOf(EffectType.SLIDE_TO_NOTE, EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE).contains(row.effect)) {
+            activeNote.actualPeriod = row.period
+            resampler.audioDataReference = 2.0
+        }
+
+        activeNote.isInstrumentCurrentlyPlaying = true
+        resampler.recalculateStep(activeNote.actualPeriod, SAMPLING_RATE)
     }
 
     /**
