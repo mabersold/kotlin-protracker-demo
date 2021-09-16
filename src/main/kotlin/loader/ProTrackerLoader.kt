@@ -2,10 +2,10 @@ package loader
 
 import model.Channel
 import model.EffectType
+import model.Instrument
 import model.Pattern
 import model.ProTrackerModule
 import model.Row
-import model.Instrument
 import model.PanningPosition
 import java.nio.ByteBuffer
 import kotlin.experimental.and

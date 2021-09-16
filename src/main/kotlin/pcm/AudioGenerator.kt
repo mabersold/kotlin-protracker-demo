@@ -158,7 +158,7 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         channelAudioGenerators.forEachIndexed { i, generator ->
             if (currentChannelIsPlaying(i))  {
                 val row = module.patterns[songPositionState.currentPatternNumber].channels[i].rows[rowNumber]
-                generator.updateActiveRow(row, module.instruments)
+                generator.setNextRow(row, module.instruments)
             }
         }
     }

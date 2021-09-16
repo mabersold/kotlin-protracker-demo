@@ -9,15 +9,16 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /**
- * ChannelAudioGenerator - does the bulk of the resampling work for a Protracker module
+ * ChannelAudioGenerator - manages the state of an individual channel. Maintains information about the current note,
+ * instrument, and effects. Processes effects relevant to the channel and applies them to the active note state.
  *
- * Contains audio PCM data, information about the current note being played, and resampling state information
+ * Has a resampler instance, which manages retrieval of instrument audio data.
  */
 class ChannelAudioGenerator(
     private val panningPosition: PanningPosition
 ) {
+    private val resampler = Resampler()
     private val activeNote = ActiveNote()
-    private val resamplingState = ResamplingState()
     private var effectState: EffectState = EffectState()
     private lateinit var activeInstrument: Instrument
     private var currentVolume: Byte = 0
@@ -26,18 +27,13 @@ class ChannelAudioGenerator(
 
     companion object {
         private const val SAMPLING_RATE = 44100.0
-        private const val PAL_CLOCK_RATE = 7093789.2
         private val SINE_TABLE = arrayListOf(0, 24, 49, 74, 97, 120, 141, 161, 180, 197, 212, 224, 235, 244, 250, 253, 255, 253, 250, 244, 235, 224, 212, 197, 180, 161, 141, 120, 97, 74, 49, 24, 0, -24, -49, -74, -97, -120, -141, -161, -180, -197, -212, -224, -235, -244, -250, -253, -255, -253, -250, -244, -235, -224, -212, -197, -180, -161, -141, -120, -97, -74, -49, -24)
     }
 
     /**
-     * retrieves next sample from the channel
+     * Retrieves the next sample from the resampler, applies volume and panning adjustment, and returns it.
      *
-     * Calculates the actual sample based on the current resampling state, then updates the resampling state
-     * The function to calculate the sample is simply by muliplying the slope by the number of interations we have passed in the current run,
-     * and then adding it to the current sample in the resampling state
-     *
-     * By doing this, we get a smooth line in between samples from the original audio data instead of blocky steps
+     * Vibrato effects are applied in here as well, since those need to be handled per-sample rather than per-tick.
      */
     fun getNextSample(): Pair<Byte, Byte> {
         if (!activeNote.isInstrumentCurrentlyPlaying) {
@@ -48,14 +44,12 @@ class ChannelAudioGenerator(
             val periodAdjustment = getVibratoPeriodAdjustment(effectState.vibrato)
             if (activeNote.actualPeriod != activeNote.specifiedPeriod + periodAdjustment) {
                 activeNote.actualPeriod = activeNote.specifiedPeriod + periodAdjustment
-                resamplingState.audioDataStep = getSamplesPerSecond(activeNote.actualPeriod) / SAMPLING_RATE
+                resampler.recalculateStep(activeNote.actualPeriod, SAMPLING_RATE)
             }
         }
 
-        val actualSample = getInterpolatedSample(resamplingState.audioDataReference, resamplingState.audioDataStep)
-        val volumeAdjustedSample = adjustForVolume(actualSample, currentVolume)
-
-        updateResamplingState()
+        val actualSample = resampler.getInterpolatedSample()
+        val volumeAdjustedSample = applyVolume(actualSample, currentVolume)
 
         if (effectState.vibrato != null) {
             effectState.vibrato!!.samplesElapsed = getUpdatedVibratoSamplesElapsed(effectState.vibrato)
@@ -65,88 +59,11 @@ class ChannelAudioGenerator(
     }
 
     /**
-     * Retrieves a sample and performs linear interpolation. This follows the following steps:
-     *
-     * 1. Get the current sample and the subsequent sample from the audio data.
-     * 2. Determine the rise between the two
-     * 3. Determine the run between the two samples: How many samples we need to interpolate before we will switch to
-     *    the next pair of samples
-     * 4. Calculate the slope - needs to be a double so we can multiply properly
-     * 5. Multiply the slope by our current position in the run and add to the sample, which is returned as a byte
+     * Handles new row data during playback - when a new row is provided, it updates the instrument, period, and effect
      */
-    private fun getInterpolatedSample(reference: Double, step: Double): Byte {
-        // 1: Get sample and subsequent sample from the audio data
-        val flooredReference = floor(reference).toInt()
-        val sample = activeInstrument.audioData?.get(flooredReference)!!
-        val subsequentSample = getSubsequentSample(activeInstrument, flooredReference)
-
-        // 2: Determine the rise
-        val rise = subsequentSample - sample
-
-        // 3: Determine the run.
-        val stepsSinceFirstStep = floor((reference - flooredReference) / step).toInt()
-        val remainingSteps = floor((flooredReference + 1 - reference) / step).toInt()
-        val run = remainingSteps + stepsSinceFirstStep + 1
-
-        // 4: Calculate the slope
-        val slope = rise.toDouble() / run.toDouble()
-
-        // 5: Multiply the slop by our current position in the run and add to the sample, and return
-        return (sample + (slope * stepsSinceFirstStep)).roundToInt().toByte()
-    }
-
-    /**
-     * updates the active row of the current object
-     *
-     * receives a row and a list of instruments
-     *
-     * If we are to play a new note, update the active note data and resampling state. A new note is indicated by if the
-     * provided row has a period of anything other than zero.
-     *
-     * Note that not every row with a period will have an instrument number specified, so only update the instrument number
-     * if it is present
-     */
-    fun updateActiveRow(row: Row, instruments: List<Instrument>) {
-        if (row.instrumentNumber != 0) {
-            if (row.instrumentNumber != activeNote.instrumentNumber) {
-                activeNote.instrumentNumber = row.instrumentNumber
-                activeInstrument = instruments[activeNote.instrumentNumber - 1]
-
-                // In rare circumstances, an instrument number might be provided without an accompanying note - if this is
-                // a different instrument than the one currently playing, stop playing it.
-                if (row.period == 0) {
-                    activeNote.isInstrumentCurrentlyPlaying = false
-                }
-
-                // If the instrument is changing, we definitely want to reset the audio data reference, unless effect is 3xx
-                if (EffectType.SLIDE_TO_NOTE != row.effect) {
-                    resamplingState.audioDataReference = 2.0
-                }
-            }
-
-            // Change the volume when an instrument is specified, regardless of whether a period is specified
-            // This will be overwritten if a change volume effect is specified - do this regardless of whether the instrument
-            // is changing or not
-            currentVolume = activeInstrument.volume
-        }
-
-        if (row.period != 0) {
-            // if the new row has a note indicated, we need to change the active period to the new active period and reset the instrument sampling position
-            activeNote.specifiedPeriod = row.period
-
-            if (EffectType.SLIDE_TO_NOTE != row.effect) {
-                activeNote.actualPeriod = row.period
-            }
-
-            activeNote.isInstrumentCurrentlyPlaying = true
-            resamplingState.audioDataStep = getSamplesPerSecond(activeNote.actualPeriod) / SAMPLING_RATE
-
-            //reset the audio data reference unless effect is 3xx
-            if (EffectType.SLIDE_TO_NOTE != row.effect) {
-                resamplingState.audioDataReference = 2.0
-            }
-        }
-
+    fun setNextRow(row: Row, instruments: List<Instrument>) {
+        updateInstrument(row, instruments)
+        updatePeriod(row)
         effectState = getEffectState(row.effect, row.effectXValue, row.effectYValue, effectState)
     }
 
@@ -165,7 +82,7 @@ class ChannelAudioGenerator(
         }
 
         if (EffectType.INSTRUMENT_OFFSET == effectState.effectType) {
-            resamplingState.audioDataReference = (effectState.xValue * 4096 + effectState.yValue * 256).toDouble()
+            resampler.audioDataReference = (effectState.xValue * 4096 + effectState.yValue * 256).toDouble()
         }
     }
 
@@ -186,17 +103,60 @@ class ChannelAudioGenerator(
                 val periodAdjustment = effectState.xValue * 16 + effectState.yValue
                 activeNote.actualPeriod = (activeNote.actualPeriod - periodAdjustment).coerceAtLeast(113)
                 activeNote.specifiedPeriod = activeNote.actualPeriod
-                resamplingState.audioDataStep = getSamplesPerSecond(activeNote.actualPeriod) / SAMPLING_RATE
+                resampler.recalculateStep(activeNote.actualPeriod, SAMPLING_RATE)
             }
             EffectType.PITCH_SLIDE_DOWN -> {
                 val periodAdjustment = effectState.xValue * 16 + effectState.yValue
                 activeNote.actualPeriod = (activeNote.actualPeriod + periodAdjustment).coerceAtMost(856)
                 activeNote.specifiedPeriod = activeNote.actualPeriod
-                resamplingState.audioDataStep = getSamplesPerSecond(activeNote.actualPeriod) / SAMPLING_RATE
+                resampler.recalculateStep(activeNote.actualPeriod, SAMPLING_RATE)
             }
-
             else -> return
         }
+    }
+
+    private fun updateInstrument(row: Row, instruments: List<Instrument>) {
+        if (row.instrumentNumber == 0) {
+            return
+        }
+
+        if (row.instrumentNumber != activeNote.instrumentNumber) {
+            activeNote.instrumentNumber = row.instrumentNumber
+            activeInstrument = instruments[activeNote.instrumentNumber - 1]
+            resampler.instrument = instruments[activeNote.instrumentNumber - 1]
+
+            // In rare circumstances, an instrument number might be provided without an accompanying note - if this is
+            // a different instrument than the one currently playing, stop playing it.
+            if (row.period == 0) {
+                activeNote.isInstrumentCurrentlyPlaying = false
+            }
+
+            // If the instrument is changing, we definitely want to reset the audio data reference, unless effect is 3xx
+            if (EffectType.SLIDE_TO_NOTE != row.effect) {
+                resampler.audioDataReference = 2.0
+            }
+        }
+
+        // Specifying instrument number always updates the volume, even if no period is specified
+        currentVolume = activeInstrument.volume
+    }
+
+    private fun updatePeriod(row: Row) {
+        if (row.period == 0) {
+            return
+        }
+
+        // if the new row has a note indicated, we need to change the active period to the new active period and reset the instrument sampling position
+        activeNote.specifiedPeriod = row.period
+
+        //a slide to note effect will not reset the position of the audio data reference or cause us to immediately change the period
+        if (!listOf(EffectType.SLIDE_TO_NOTE, EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE).contains(row.effect)) {
+            activeNote.actualPeriod = row.period
+            resampler.audioDataReference = 2.0
+        }
+
+        activeNote.isInstrumentCurrentlyPlaying = true
+        resampler.recalculateStep(activeNote.actualPeriod, SAMPLING_RATE)
     }
 
     /**
@@ -204,7 +164,7 @@ class ChannelAudioGenerator(
      * with the sample at the original value that it was already at. For anything below 64, it determines the volume ratio
      * and multiplies the sample by that. A volume value of zero will result in a sample value of zero.
      */
-    private fun adjustForVolume(actualSample: Byte, volume: Byte): Byte {
+    private fun applyVolume(actualSample: Byte, volume: Byte): Byte {
         if (volume == 64.toByte()) {
             return actualSample
         }
@@ -220,46 +180,6 @@ class ChannelAudioGenerator(
      */
     private fun getStereoSample(sample: Byte): Pair<Byte, Byte> =
         if (PanningPosition.LEFT == panningPosition) Pair(sample, 0) else Pair(0, sample)
-
-    /**
-     * Updates the resampling state - to be called after every time we generate a sample
-     */
-    private fun updateResamplingState() {
-        resamplingState.audioDataReference += resamplingState.audioDataStep
-
-        //If we have exceeded the length of the audio data for an unlooped instrument, we want to stop playing it
-        if (!isInstrumentLooped(activeInstrument) && activeNote.isInstrumentCurrentlyPlaying && resamplingState.audioDataReference.roundToInt() >= activeInstrument.audioData?.size!!) {
-            activeNote.isInstrumentCurrentlyPlaying = false
-            activeNote.actualPeriod = 0
-        } else if (isInstrumentLooped(activeInstrument) && activeNote.isInstrumentCurrentlyPlaying && resamplingState.audioDataReference.roundToInt() >= activeInstrument.audioData?.size!!) {
-            val referenceRemainder = resamplingState.audioDataReference - floor(resamplingState.audioDataReference)
-            resamplingState.audioDataReference = (activeInstrument.repeatOffsetStart * 2).toDouble() + referenceRemainder
-        }
-    }
-
-    /**
-     * Determine the next sample we will use for interpolation. Normally, this will just be 1 position higher than the
-     * current sample. If we reach the end of the audio data, we will either return a 0 (for an unlooped instrument) or
-     * whatever is at the repeat offset (for a looped instrument)
-     */
-    private fun getSubsequentSample(instrument: Instrument, currentSamplePosition: Int): Byte {
-        if (currentSamplePosition + 1 >= instrument.audioData?.size!!) {
-            if (!isInstrumentLooped(instrument)) {
-                return 0
-            }
-
-            //if the instrument is looped, return whatever value is at the repeat offset start
-            return instrument.audioData?.get(instrument.repeatOffsetStart * 2)!!
-        }
-
-        return instrument.audioData?.get(currentSamplePosition + 1) ?: 0
-    }
-
-    private fun getSamplesPerSecond(activePeriod: Int) =
-        PAL_CLOCK_RATE / (activePeriod * 2)
-
-    private fun isInstrumentLooped(instrument: Instrument) =
-        instrument.repeatLength > 1
 
     private fun applyVolumeSlideAdjustment(xValue: Int, yValue: Int, volume: Byte) =
         if (xValue > 0) {
@@ -278,7 +198,7 @@ class ChannelAudioGenerator(
             activeNote.actualPeriod = (activeNote.actualPeriod + periodShift).coerceAtMost(activeNote.specifiedPeriod)
         }
 
-        resamplingState.audioDataStep = getSamplesPerSecond(activeNote.actualPeriod) / SAMPLING_RATE
+        resampler.recalculateStep(activeNote.actualPeriod, SAMPLING_RATE)
     }
 
     private fun getEffectState(effectType: EffectType, xValue: Int, yValue: Int, previousEffectState: EffectState): EffectState {
@@ -346,11 +266,6 @@ class ChannelAudioGenerator(
         else
             previousVibratoState.samplesElapsed + 1
     }
-
-    data class ResamplingState(
-        var audioDataReference: Double = 2.0,
-        var audioDataStep: Double = 0.0
-    )
 
     data class ActiveNote(
         var isInstrumentCurrentlyPlaying: Boolean = false,
