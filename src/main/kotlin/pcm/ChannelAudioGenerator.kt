@@ -15,15 +15,15 @@ import kotlin.math.roundToInt
  * Has a resampler instance, which manages retrieval of instrument audio data.
  */
 class ChannelAudioGenerator(
-    private val panningPosition: PanningPosition
+    private val panningPosition: PanningPosition,
+    var beatsPerMinute: Int = 125,
+    var ticksPerRow: Int = 6
 ) {
     private val resampler = Resampler()
     private val activeNote = ActiveNote()
     private var effectState: EffectState = EffectState()
     private lateinit var activeInstrument: Instrument
     private var currentVolume: Byte = 0
-    var beatsPerMinute: Int = 125
-    var ticksPerRow: Int = 6
 
     companion object {
         private const val SAMPLING_RATE = 44100.0
@@ -61,7 +61,7 @@ class ChannelAudioGenerator(
     /**
      * Handles new row data during playback - when a new row is provided, it updates the instrument, period, and effect
      */
-    fun setNextRow(row: Row, instruments: List<Instrument>) {
+    fun setRowData(row: Row, instruments: List<Instrument>) {
         updateInstrument(row, instruments)
         updatePeriod(row)
         effectState = getEffectState(row.effect, row.effectXValue, row.effectYValue, effectState)

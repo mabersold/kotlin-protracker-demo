@@ -14,13 +14,18 @@ import model.Row
 class AudioGenerator(private val module: ProTrackerModule, replacementOrderList: List<Int> = listOf(), private val soloChannels: List<Int> = listOf()) {
     private var ticksPerRow = 6
     private var beatsPerMinute = 125
-    private val orderList = replacementOrderList.ifEmpty { module.orderList.subList(0, module.numberOfSongPositions.toInt()) }
+    private val orderList = replacementOrderList.ifEmpty { this.module.orderList.subList(0, this.module.numberOfSongPositions.toInt()) }
     private val samplesPerTick = getSamplesPerTick()
-    private val globalEffects = hashMapOf<EffectType, Int>()
 
     private val channelAudioGenerators: ArrayList<ChannelAudioGenerator> = ArrayList()
 
-    private val songPositionState: SongPositionState = SongPositionState(0, 0, 0, 0, orderList[0])
+    private var orderListPosition = 0
+    private var samplePosition = 0
+    private var tickPosition = 0
+    private var rowPosition = 0
+    private var currentlyPlayingPatternNumber = this.orderList[this.orderListPosition]
+    private var nextRowPosition = 0
+    private var nextRowPattern = this.currentlyPlayingPatternNumber
 
     companion object {
         private const val SAMPLING_RATE = 44100.0
@@ -28,27 +33,33 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
 
     init {
         //Generate channel audio generators for each channel in the module
-        module.patterns[songPositionState.currentPatternNumber].channels.forEach { channel ->
-            val channelAudioGenerator = ChannelAudioGenerator(channel.panningPosition)
-            channelAudioGenerator.beatsPerMinute = this.beatsPerMinute
-            channelAudioGenerator.ticksPerRow = this.ticksPerRow
-            channelAudioGenerators.add(channelAudioGenerator)
+        this.module.patterns[this.currentlyPlayingPatternNumber].channels.forEach { channel ->
+            this.channelAudioGenerators.add(ChannelAudioGenerator(channel.panningPosition, this.beatsPerMinute, this.ticksPerRow))
         }
+
+        determineNextRow()
     }
 
     fun songStillActive(): Boolean =
-        songPositionState.currentOrderListPosition < orderList.size
+        this.rowPosition != -1
 
     /**
      * Retrieves the next sample in the song, mixing the results from each channel audio generator
      */
     fun generateNextSample(): Pair<Byte, Byte> {
-        updateRowData()
+        recalculateSongPosition()
+
+        if (!songStillActive()) {
+            return Pair(0, 0)
+        }
+
+        applyNewRowData()
+        applyPerTickEffects()
 
         var leftSample = 0
         var rightSample = 0
 
-        channelAudioGenerators.forEachIndexed { i, generator ->
+        this.channelAudioGenerators.forEachIndexed { i, generator ->
             if (currentChannelIsPlaying(i)) {
                 val nextSample = generator.getNextSample()
                 leftSample += nextSample.first
@@ -56,8 +67,7 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
             }
         }
 
-        updateSongPosition()
-        applyPerTickEffects()
+        this.samplePosition++
 
         return Pair(
             leftSample.coerceAtMost(Byte.MAX_VALUE.toInt()).coerceAtLeast(Byte.MIN_VALUE.toInt()).toByte(),
@@ -66,59 +76,79 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
     }
 
     /**
-     * If we are at the start of a new row, update the channel audio generators with new row data
+     * If we are at the start of a new row, update the channel audio generators with new row data, and apply start of
+     * row effects, if present
      */
-    private fun updateRowData() {
-        if (!isStartOfNewRow(songPositionState)) {
+    private fun applyNewRowData() {
+        if (!isStartOfNewRow()) {
             return
         }
 
-        if (globalEffects[EffectType.PATTERN_BREAK] != null) {
-            // apply the pattern break
-            songPositionState.currentRowPosition = globalEffects[EffectType.PATTERN_BREAK]!!
-            songPositionState.currentOrderListPosition++
+        sendRowDataToChannels(this.rowPosition)
 
-            // Remove the pattern break from the global effects
-            globalEffects.remove(EffectType.PATTERN_BREAK)
-        }
-
-        updateRow(songPositionState.currentRowPosition)
-
-        channelAudioGenerators.forEachIndexed { i, generator ->
+        this.channelAudioGenerators.forEachIndexed { i, generator ->
             if (currentChannelIsPlaying(i)) {
                 generator.applyStartOfRowEffects()
             }
         }
     }
 
-    private fun updateSongPosition() {
-        songPositionState.currentSamplePosition++
-
-        //if samplePosition > samples per tick, go to the next tick
-        if (songPositionState.currentSamplePosition > samplesPerTick) {
-            songPositionState.currentSamplePosition = 0
-            songPositionState.currentTickPosition++
+    /**
+     * This function is how we keep track of our position in the song. The samplePosition counter is increased every
+     * time we generate a new sample. In this function, if we have exceeded samples per tick, increase the tick number.
+     * If we have exceeded the number of ticks per row, advance to the next row and calculate what the new next row
+     * will be.
+     */
+    private fun recalculateSongPosition() {
+        // Update tick position, if needed
+        if (this.samplePosition > this.samplesPerTick) {
+            this.samplePosition = 0
+            this.tickPosition++
         }
 
-        //update row
-        if (songPositionState.currentTickPosition >= ticksPerRow) {
-            songPositionState.currentTickPosition = 0
-            songPositionState.currentRowPosition++
+        // Update row position, order list position, and current pattern number, if needed
+        if (this.tickPosition >= this.ticksPerRow) {
+            this.tickPosition = 0
+            this.rowPosition = this.nextRowPosition
+            this.currentlyPlayingPatternNumber = this.nextRowPattern
+            determineNextRow()
+        }
+    }
+
+    /**
+     * This function determines what our next row will be. If we are at the last row of the song, set to -1. If we are
+     * at the last row of the pattern but not the last row of the song, the next row will either be the first row of the
+     * next pattern in the order list, or whatever the pattern break specifies (if the effect is present in the row). In
+     * all other cases, the next row position is just the current row position + 1.
+     */
+    private fun determineNextRow() {
+        if (!songStillActive()) {
+            return
         }
 
-        //Update pattern
-        if (songPositionState.currentRowPosition >= 64) {
-            songPositionState.currentOrderListPosition++
-            songPositionState.currentRowPosition = 0
+        val isLastRowOfPattern = this.rowPosition == 63 || rowHasGlobalEffect(EffectType.PATTERN_BREAK, this.module, this.currentlyPlayingPatternNumber, this.rowPosition)
+        val isLastRowOfSong = isLastRowOfPattern && (this.orderListPosition + 1 >= this.orderList.size)
+
+        if (isLastRowOfSong) {
+            this.nextRowPosition = -1
+            this.nextRowPattern = -1
+        } else if (isLastRowOfPattern) {
+            val patternBreakRow = getRowWithGlobalEffect(this.rowPosition, EffectType.PATTERN_BREAK, this.currentlyPlayingPatternNumber, this.module)
+
+            this.nextRowPosition = (((patternBreakRow?.effectXValue ?: (0 * 10)) + (patternBreakRow?.effectYValue ?: 0))).coerceAtMost(63)
+            this.nextRowPattern = this.orderList[this.orderListPosition + 1]
+            this.orderListPosition++
+        } else {
+            this.nextRowPosition = this.rowPosition + 1
         }
     }
 
     private fun applyPerTickEffects() {
-        if (!isStartOfNewTick(songPositionState)) {
+        if (!isStartOfNewTick()) {
             return
         }
 
-        channelAudioGenerators.forEachIndexed { i, generator ->
+        this.channelAudioGenerators.forEachIndexed { i, generator ->
             if (currentChannelIsPlaying(i)) {
                 generator.applyPerTickEffects()
             }
@@ -126,55 +156,47 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
     }
 
     private fun getSamplesPerTick(): Double {
-        val beatsPerSecond = beatsPerMinute.toDouble() / 60.0
+        val beatsPerSecond = this.beatsPerMinute.toDouble() / 60.0
         val samplesPerBeat = SAMPLING_RATE / beatsPerSecond
         val samplesPerRow = samplesPerBeat / 4
-        return samplesPerRow / ticksPerRow
+        return samplesPerRow / this.ticksPerRow
     }
 
-    private fun isStartOfNewTick(songPositionState: SongPositionState): Boolean =
-        songStillActive() && songPositionState.currentSamplePosition == 0 && songPositionState.currentTickPosition != 0
+    private fun isStartOfNewTick(): Boolean =
+        songStillActive() && this.samplePosition == 0 && this.tickPosition != 0
 
-    private fun isStartOfNewRow(songPositionState: SongPositionState): Boolean =
-        songStillActive() && songPositionState.currentTickPosition == 0 && songPositionState.currentSamplePosition == 0
+    private fun isStartOfNewRow(): Boolean =
+        songStillActive() && this.tickPosition == 0 && this.samplePosition == 0
 
     /**
      * Updates the channel audio generators with new row information - note, effects, and audio data
      */
-    private fun updateRow(rowNumber: Int) {
-        songPositionState.currentPatternNumber = orderList[songPositionState.currentOrderListPosition]
-
-        //If the current row has a pattern break, set pattern break data
-        if (rowHasGlobalEffect(EffectType.PATTERN_BREAK, module, songPositionState.currentPatternNumber, rowNumber)) {
-            val patternBreakRow = getRowWithGlobalEffect(rowNumber, EffectType.PATTERN_BREAK, songPositionState.currentPatternNumber, module)
-            globalEffects[patternBreakRow?.effect!!] = (patternBreakRow.effectXValue * 10 + patternBreakRow.effectYValue)
-        }
-
-        if (rowHasGlobalEffect(EffectType.CHANGE_SPEED, module, songPositionState.currentPatternNumber, rowNumber)) {
+    private fun sendRowDataToChannels(rowNumber: Int) {
+        // Channel audio generators need to be aware of speed changes for vibrato calculating purposes
+        if (rowHasGlobalEffect(EffectType.CHANGE_SPEED, this.module, this.currentlyPlayingPatternNumber, rowNumber)) {
             applySpeedChange(rowNumber)
         }
 
-        //update the active row in the channel audio generators
-        channelAudioGenerators.forEachIndexed { i, generator ->
+        this.channelAudioGenerators.forEachIndexed { i, generator ->
             if (currentChannelIsPlaying(i))  {
-                val row = module.patterns[songPositionState.currentPatternNumber].channels[i].rows[rowNumber]
-                generator.setNextRow(row, module.instruments)
+                val row = this.module.patterns[this.currentlyPlayingPatternNumber].channels[i].rows[rowNumber]
+                generator.setRowData(row, this.module.instruments)
             }
         }
     }
 
     private fun applySpeedChange(rowNumber: Int) {
-        val speedChangeRow = getRowWithGlobalEffect(rowNumber, EffectType.CHANGE_SPEED, songPositionState.currentPatternNumber, module)
+        val speedChangeRow = getRowWithGlobalEffect(rowNumber, EffectType.CHANGE_SPEED, this.currentlyPlayingPatternNumber, this.module) ?: return
 
-        val speedChange = speedChangeRow?.effectXValue!! * 16 + speedChangeRow.effectYValue
+        val speedChange = speedChangeRow.effectXValue * 16 + speedChangeRow.effectYValue
         if (speedChange < 32) {
             this.ticksPerRow = speedChange
-            channelAudioGenerators.forEach { generator ->
+            this.channelAudioGenerators.forEach { generator ->
                 generator.ticksPerRow = speedChange
             }
         } else {
             this.beatsPerMinute = speedChange
-            channelAudioGenerators.forEach { generator ->
+            this.channelAudioGenerators.forEach { generator ->
                 generator.beatsPerMinute = speedChange
             }
         }
@@ -191,13 +213,5 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         }?.rows?.get(rowNumber)
 
     private fun currentChannelIsPlaying(channelNumber: Int): Boolean =
-        soloChannels.isEmpty() || soloChannels.contains(channelNumber)
-
-    data class SongPositionState(
-        var currentOrderListPosition: Int,
-        var currentRowPosition: Int,
-        var currentTickPosition: Int,
-        var currentSamplePosition: Int,
-        var currentPatternNumber: Int,
-    )
+        this.soloChannels.isEmpty() || this.soloChannels.contains(channelNumber)
 }
