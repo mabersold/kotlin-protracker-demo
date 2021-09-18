@@ -20,10 +20,29 @@ class ChannelAudioGenerator(
     var ticksPerRow: Int = 6
 ) {
     private val resampler = Resampler()
-    private val activeNote = ActiveNote()
-    private var effectState: EffectState = EffectState()
+
+    // Instrument state variables
+    private var currentInstrumentNumber: Int = 0
     private lateinit var activeInstrument: Instrument
+
+    // Note state variables
+    private var actualPeriod: Int = 0
+    private var specifiedPeriod: Int = 0
+    private var isInstrumentPlaying: Boolean = false
+
+    // Effect state variables
     private var currentVolume: Byte = 0
+    private var currentEffect: EffectType = EffectType.UNKNOWN_EFFECT
+    private var effectXValue: Int = 0
+    private var effectYValue: Int = 0
+
+    // State variables for specific effect types
+    private var slideToNotePeriodShift: Int = 0
+    private var vibratoCyclesPerRow: Double = 0.0
+    private var vibratoDepth: Int = 0
+    private var vibratoSamplesPerCyclePosition: Double = 0.0
+    private var vibratoSamplesPerCycle: Double = 0.0
+    private var vibratoSamplesElapsed: Int = 0
 
     companion object {
         private const val SAMPLING_RATE = 44100.0
@@ -36,23 +55,21 @@ class ChannelAudioGenerator(
      * Vibrato effects are applied in here as well, since those need to be handled per-sample rather than per-tick.
      */
     fun getNextSample(): Pair<Byte, Byte> {
-        if (!activeNote.isInstrumentCurrentlyPlaying) {
+        if (!this.isInstrumentPlaying) {
             return Pair(0, 0)
         }
 
-        if (effectState.effectType == EffectType.VIBRATO) {
-            val periodAdjustment = getVibratoPeriodAdjustment(effectState.vibrato)
-            if (activeNote.actualPeriod != activeNote.specifiedPeriod + periodAdjustment) {
-                activeNote.actualPeriod = activeNote.specifiedPeriod + periodAdjustment
-                resampler.recalculateStep(activeNote.actualPeriod, SAMPLING_RATE)
-            }
+        val vibratoPeriodAdjustment = getVibratoPeriodAdjustment()
+        if (vibratoPeriodAdjustment != 0 && this.actualPeriod != this.specifiedPeriod + vibratoPeriodAdjustment) {
+            this.actualPeriod = this.specifiedPeriod + vibratoPeriodAdjustment
+            this.resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
         }
 
-        val actualSample = resampler.getInterpolatedSample()
+        val actualSample = this.resampler.getInterpolatedSample()
         val volumeAdjustedSample = applyVolume(actualSample, currentVolume)
 
-        if (effectState.vibrato != null) {
-            effectState.vibrato!!.samplesElapsed = getUpdatedVibratoSamplesElapsed(effectState.vibrato)
+        if (this.currentEffect == EffectType.VIBRATO) {
+            this.vibratoSamplesElapsed = getUpdatedVibratoSamplesElapsed()
         }
 
         return getStereoSample(volumeAdjustedSample)
@@ -64,25 +81,25 @@ class ChannelAudioGenerator(
     fun setRowData(row: Row, instruments: List<Instrument>) {
         updateInstrument(row, instruments)
         updatePeriod(row)
-        effectState = getEffectState(row.effect, row.effectXValue, row.effectYValue, effectState)
+        updateEffect(row.effect, row.effectXValue, row.effectYValue)
     }
 
     /**
      * Applies effects that take place only once at the start of a row, before any pcm data has been generated for that row
      */
     fun applyStartOfRowEffects() {
-        currentVolume = when(effectState.effectType) {
+        this.currentVolume = when(this.currentEffect) {
             EffectType.FINE_VOLUME_SLIDE_UP ->
-                (currentVolume + effectState.yValue).coerceAtMost(64).toByte()
+                (this.currentVolume + this.effectYValue).coerceAtMost(64).toByte()
             EffectType.FINE_VOLUME_SLIDE_DOWN ->
-                (currentVolume - effectState.yValue).coerceAtLeast(0).toByte()
+                (this.currentVolume - this.effectYValue).coerceAtLeast(0).toByte()
             EffectType.SET_VOLUME ->
-                (effectState.xValue * 16 + effectState.yValue).coerceAtMost(64).toByte()
-            else -> currentVolume
+                (this.effectXValue * 16 + this.effectYValue).coerceAtMost(64).toByte()
+            else -> this.currentVolume
         }
 
-        if (EffectType.INSTRUMENT_OFFSET == effectState.effectType) {
-            resampler.audioDataReference = (effectState.xValue * 4096 + effectState.yValue * 256).toDouble()
+        if (EffectType.INSTRUMENT_OFFSET == this.currentEffect) {
+            this.resampler.audioDataReference = (this.effectXValue * 4096 + this.effectYValue * 256).toDouble()
         }
     }
 
@@ -90,26 +107,26 @@ class ChannelAudioGenerator(
      * Applies effects that should be applied once per tick
      */
     fun applyPerTickEffects() {
-        when(effectState.effectType) {
+        when(this.currentEffect) {
             EffectType.SLIDE_TO_NOTE ->
-                applySlideToNoteAdjustment(effectState.slideToNote)
+                applySlideToNoteAdjustment()
             EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE -> {
-                applySlideToNoteAdjustment(effectState.slideToNote)
-                currentVolume = applyVolumeSlideAdjustment(effectState.xValue, effectState.yValue, currentVolume)
+                applySlideToNoteAdjustment()
+                this.currentVolume = applyVolumeSlideAdjustment(this.effectXValue, this.effectYValue, this.currentVolume)
             }
             EffectType.VOLUME_SLIDE ->
-                currentVolume = applyVolumeSlideAdjustment(effectState.xValue, effectState.yValue, currentVolume)
+                this.currentVolume = applyVolumeSlideAdjustment(this.effectXValue, this.effectYValue, this.currentVolume)
             EffectType.PITCH_SLIDE_UP -> {
-                val periodAdjustment = effectState.xValue * 16 + effectState.yValue
-                activeNote.actualPeriod = (activeNote.actualPeriod - periodAdjustment).coerceAtLeast(113)
-                activeNote.specifiedPeriod = activeNote.actualPeriod
-                resampler.recalculateStep(activeNote.actualPeriod, SAMPLING_RATE)
+                val periodAdjustment = this.effectXValue * 16 + this.effectYValue
+                this.actualPeriod = (this.actualPeriod - periodAdjustment).coerceAtLeast(113)
+                this.specifiedPeriod = this.actualPeriod
+                resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
             }
             EffectType.PITCH_SLIDE_DOWN -> {
-                val periodAdjustment = effectState.xValue * 16 + effectState.yValue
-                activeNote.actualPeriod = (activeNote.actualPeriod + periodAdjustment).coerceAtMost(856)
-                activeNote.specifiedPeriod = activeNote.actualPeriod
-                resampler.recalculateStep(activeNote.actualPeriod, SAMPLING_RATE)
+                val periodAdjustment = this.effectXValue * 16 + this.effectYValue
+                this.actualPeriod = (this.actualPeriod + periodAdjustment).coerceAtMost(856)
+                this.specifiedPeriod = this.actualPeriod
+                this.resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
             }
             else -> return
         }
@@ -120,25 +137,25 @@ class ChannelAudioGenerator(
             return
         }
 
-        if (row.instrumentNumber != activeNote.instrumentNumber) {
-            activeNote.instrumentNumber = row.instrumentNumber
-            activeInstrument = instruments[activeNote.instrumentNumber - 1]
-            resampler.instrument = instruments[activeNote.instrumentNumber - 1]
+        if (row.instrumentNumber != this.currentInstrumentNumber) {
+            this.currentInstrumentNumber = row.instrumentNumber
+            this.activeInstrument = instruments[this.currentInstrumentNumber - 1]
+            this.resampler.instrument = instruments[this.currentInstrumentNumber - 1]
 
             // In rare circumstances, an instrument number might be provided without an accompanying note - if this is
             // a different instrument than the one currently playing, stop playing it.
             if (row.period == 0) {
-                activeNote.isInstrumentCurrentlyPlaying = false
+                this.isInstrumentPlaying = false
             }
 
             // If the instrument is changing, we definitely want to reset the audio data reference, unless effect is 3xx
             if (EffectType.SLIDE_TO_NOTE != row.effect) {
-                resampler.audioDataReference = 2.0
+                this.resampler.audioDataReference = 2.0
             }
         }
 
         // Specifying instrument number always updates the volume, even if no period is specified
-        currentVolume = activeInstrument.volume
+        this.currentVolume = this.activeInstrument.volume
     }
 
     private fun updatePeriod(row: Row) {
@@ -147,16 +164,16 @@ class ChannelAudioGenerator(
         }
 
         // if the new row has a note indicated, we need to change the active period to the new active period and reset the instrument sampling position
-        activeNote.specifiedPeriod = row.period
+        this.specifiedPeriod = row.period
 
         //a slide to note effect will not reset the position of the audio data reference or cause us to immediately change the period
         if (!listOf(EffectType.SLIDE_TO_NOTE, EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE).contains(row.effect)) {
-            activeNote.actualPeriod = row.period
+            this.actualPeriod = row.period
             resampler.audioDataReference = 2.0
         }
 
-        activeNote.isInstrumentCurrentlyPlaying = true
-        resampler.recalculateStep(activeNote.actualPeriod, SAMPLING_RATE)
+        this.isInstrumentPlaying = true
+        this.resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
     }
 
     /**
@@ -179,7 +196,7 @@ class ChannelAudioGenerator(
      * sample in the pair's first field for left panning, or second field for right panning.
      */
     private fun getStereoSample(sample: Byte): Pair<Byte, Byte> =
-        if (PanningPosition.LEFT == panningPosition) Pair(sample, 0) else Pair(0, sample)
+        if (PanningPosition.LEFT == this.panningPosition) Pair(sample, 0) else Pair(0, sample)
 
     private fun applyVolumeSlideAdjustment(xValue: Int, yValue: Int, volume: Byte) =
         if (xValue > 0) {
@@ -188,109 +205,65 @@ class ChannelAudioGenerator(
             (volume - yValue).coerceAtLeast(0).toByte()
         }
 
-    private fun applySlideToNoteAdjustment(slideToNote: SlideToNoteState?) {
-        if (activeNote.actualPeriod == activeNote.specifiedPeriod) return
+    private fun applySlideToNoteAdjustment() {
+        if (this.actualPeriod == this.specifiedPeriod) return
 
-        val periodShift = slideToNote?.periodShift ?: 0
-        if (activeNote.actualPeriod > activeNote.specifiedPeriod) {
-            activeNote.actualPeriod = (activeNote.actualPeriod - periodShift).coerceAtLeast(activeNote.specifiedPeriod)
-        } else if (activeNote.actualPeriod < activeNote.specifiedPeriod) {
-            activeNote.actualPeriod = (activeNote.actualPeriod + periodShift).coerceAtMost(activeNote.specifiedPeriod)
+        val periodShift = this.slideToNotePeriodShift
+        if (this.actualPeriod > this.specifiedPeriod) {
+            this.actualPeriod = (this.actualPeriod - periodShift).coerceAtLeast(this.specifiedPeriod)
+        } else if (this.actualPeriod < this.specifiedPeriod) {
+            this.actualPeriod = (this.actualPeriod + periodShift).coerceAtMost(this.specifiedPeriod)
         }
 
-        resampler.recalculateStep(activeNote.actualPeriod, SAMPLING_RATE)
+        resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
     }
 
-    private fun getEffectState(effectType: EffectType, xValue: Int, yValue: Int, previousEffectState: EffectState): EffectState {
-        val effectState = EffectState()
-        effectState.vibrato = previousEffectState.vibrato
-        effectState.slideToNote = previousEffectState.slideToNote
-        effectState.effectType = effectType
-        effectState.xValue = xValue
-        effectState.yValue = yValue
-
+    private fun updateEffect(effectType: EffectType, xValue: Int, yValue: Int) {
         when (effectType) {
             EffectType.SLIDE_TO_NOTE -> {
-                effectState.slideToNote = getSlideToNoteEffectState(xValue, yValue, previousEffectState.slideToNote)
+                this.slideToNotePeriodShift = getSlideToNotePeriodShift(xValue, yValue)
             }
             EffectType.VIBRATO -> {
-                effectState.vibrato = getVibratoEffectState(xValue, yValue, previousEffectState.vibrato)
+                val continueActiveVibrato = this.currentEffect == effectType
+                updateVibratoState(xValue, yValue, continueActiveVibrato)
             }
             else -> {}
         }
 
-        return effectState
+        this.currentEffect = effectType
+        this.effectXValue = xValue
+        this.effectYValue = yValue
     }
 
-    private fun getVibratoEffectState(xValue: Int, yValue: Int, previousVibratoState: VibratoState?): VibratoState {
-        val samplesElapsed = previousVibratoState?.samplesElapsed ?: 0
+    private fun updateVibratoState(xValue: Int, yValue: Int, continueActiveVibrato: Boolean) {
+        this.vibratoSamplesElapsed = if (continueActiveVibrato) this.vibratoSamplesElapsed else 0
 
-        val cyclesPerRow = if (xValue == 0) previousVibratoState?.cyclesPerRow!! else xValue * ticksPerRow / 64.0
-        val depth = if (yValue == 0) previousVibratoState?.depth!! else yValue
+        this.vibratoCyclesPerRow = if (xValue == 0) this.vibratoCyclesPerRow else xValue * this.ticksPerRow / 64.0
+        this.vibratoDepth = if (yValue == 0) this.vibratoDepth else yValue
 
         val samplesPerRow = (SAMPLING_RATE / (beatsPerMinute / 60.0)) / 4
 
-        val samplesPerCycle = samplesPerRow * cyclesPerRow.pow(-1)
-        val samplesPerCyclePosition = samplesPerCycle / 64
-
-        return VibratoState(cyclesPerRow, depth, samplesPerCyclePosition, samplesPerCycle, samplesElapsed)
+        this.vibratoSamplesPerCycle = samplesPerRow * this.vibratoCyclesPerRow.pow(-1)
+        this.vibratoSamplesPerCyclePosition = this.vibratoSamplesPerCycle / 64
     }
 
-    private fun getSlideToNoteEffectState(xValue: Int, yValue: Int, previousSlideToNoteState: SlideToNoteState?): SlideToNoteState {
-        val periodShift = if (xValue == 0 && yValue == 0 && previousSlideToNoteState != null) {
-            previousSlideToNoteState.periodShift
-        } else {
-            xValue * 16 + yValue
-        }
+    private fun getSlideToNotePeriodShift(xValue: Int, yValue: Int): Int =
+        if (xValue == 0 && yValue == 0) this.slideToNotePeriodShift else xValue * 16 + yValue
 
-        return SlideToNoteState(periodShift)
-    }
-
-    private fun getVibratoPeriodAdjustment(vibratoState: VibratoState?): Int {
-        if (vibratoState == null) {
+    private fun getVibratoPeriodAdjustment(): Int {
+        if (this.currentEffect != EffectType.VIBRATO) {
             return 0
         }
 
-        val vibratoCyclePosition = vibratoState.samplesElapsed / vibratoState.samplesPerCyclePosition
+        val vibratoCyclePosition = this.vibratoSamplesElapsed / this.vibratoSamplesPerCyclePosition
         val sineTableValue = SINE_TABLE[floor(vibratoCyclePosition).toInt()]
-        return sineTableValue * vibratoState.depth / 128
+        return sineTableValue * this.vibratoDepth / 128
     }
 
-    private fun getUpdatedVibratoSamplesElapsed(previousVibratoState: VibratoState?): Int {
-        if (previousVibratoState == null) {
-            return 0
-        }
-
-        return if (previousVibratoState.samplesElapsed + 1 >= previousVibratoState.samplesPerCycle)
+    private fun getUpdatedVibratoSamplesElapsed(): Int {
+        return if (this.vibratoSamplesElapsed + 1 >= this.vibratoSamplesPerCycle)
             0
         else
-            previousVibratoState.samplesElapsed + 1
+            this.vibratoSamplesElapsed + 1
     }
-
-    data class ActiveNote(
-        var isInstrumentCurrentlyPlaying: Boolean = false,
-        var actualPeriod: Int = 0,
-        var specifiedPeriod: Int = 0,
-        var instrumentNumber: Int = 0
-    )
-
-    data class EffectState(
-        var effectType: EffectType = EffectType.UNKNOWN_EFFECT,
-        var xValue: Int = 0,
-        var yValue: Int = 0,
-        var vibrato: VibratoState? = null,
-        var slideToNote: SlideToNoteState? = null
-    )
-
-    data class SlideToNoteState(
-        var periodShift: Int = 0
-    )
-
-    data class VibratoState(
-        var cyclesPerRow: Double = 0.0,
-        var depth: Int = 0,
-        var samplesPerCyclePosition: Double = 0.0,
-        var samplesPerCycle: Double = 0.0,
-        var samplesElapsed: Int = 0
-    )
 }
