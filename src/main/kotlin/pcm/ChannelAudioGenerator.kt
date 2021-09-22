@@ -1,5 +1,7 @@
 package pcm
 
+import model.Constants.INSTRUMENT_STARTING_REFERENCE
+import model.Constants.SAMPLING_RATE
 import model.EffectType
 import model.Instrument
 import model.PanningPosition
@@ -45,7 +47,6 @@ class ChannelAudioGenerator(
     private var vibratoSamplesElapsed: Int = 0
 
     companion object {
-        private const val SAMPLING_RATE = 44100.0
         private val SINE_TABLE = arrayListOf(0, 24, 49, 74, 97, 120, 141, 161, 180, 197, 212, 224, 235, 244, 250, 253, 255, 253, 250, 244, 235, 224, 212, 197, 180, 161, 141, 120, 97, 74, 49, 24, 0, -24, -49, -74, -97, -120, -141, -161, -180, -197, -212, -224, -235, -244, -250, -253, -255, -253, -250, -244, -235, -224, -212, -197, -180, -161, -141, -120, -97, -74, -49, -24)
     }
 
@@ -150,7 +151,7 @@ class ChannelAudioGenerator(
 
             // If the instrument is changing, we definitely want to reset the audio data reference, unless effect is 3xx
             if (EffectType.SLIDE_TO_NOTE != row.effect) {
-                this.resampler.audioDataReference = 2.0
+                this.resampler.audioDataReference = INSTRUMENT_STARTING_REFERENCE
             }
         }
 
@@ -169,7 +170,7 @@ class ChannelAudioGenerator(
         //a slide to note effect will not reset the position of the audio data reference or cause us to immediately change the period
         if (!listOf(EffectType.SLIDE_TO_NOTE, EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE).contains(row.effect)) {
             this.actualPeriod = row.period
-            resampler.audioDataReference = 2.0
+            resampler.audioDataReference = INSTRUMENT_STARTING_REFERENCE
         }
 
         this.isInstrumentPlaying = true

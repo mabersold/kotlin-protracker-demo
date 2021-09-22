@@ -1,5 +1,7 @@
 package pcm
 
+import model.Constants
+import model.Constants.INSTRUMENT_STARTING_REFERENCE
 import model.Instrument
 import kotlin.math.floor
 import kotlin.math.roundToInt
@@ -19,7 +21,7 @@ class Resampler {
         private const val PAL_CLOCK_RATE = 7093789.2
     }
 
-    var audioDataReference: Double = 2.0
+    var audioDataReference: Double = INSTRUMENT_STARTING_REFERENCE
     var instrument: Instrument? = null
     private var step: Double = 0.0
 

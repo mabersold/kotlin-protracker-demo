@@ -1,5 +1,7 @@
 package pcm
 
+import model.Constants
+import model.Constants.SAMPLING_RATE
 import model.EffectType
 import model.ProTrackerModule
 import model.Row
@@ -27,10 +29,6 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
     private var nextRowPosition = 0
     private var nextRowPattern = this.currentlyPlayingPatternNumber
 
-    companion object {
-        private const val SAMPLING_RATE = 44100.0
-    }
-
     init {
         //Generate channel audio generators for each channel in the module
         this.module.patterns[this.currentlyPlayingPatternNumber].channels.forEach { channel ->
@@ -44,35 +42,44 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         this.rowPosition != -1
 
     /**
-     * Retrieves the next sample in the song, mixing the results from each channel audio generator
+     * Retrieves the next set of samples in the song, mixing the results from each channel audio generator
      */
-    fun generateNextSample(): Pair<Byte, Byte> {
-        recalculateSongPosition()
-
+    fun generateNextSamples(numberOfSamples: Int = 0): List<Pair<Byte, Byte>> {
         if (!songStillActive()) {
-            return Pair(0, 0)
+            return listOf(Pair(0, 0))
         }
 
-        applyNewRowData()
-        applyPerTickEffects()
+        // if numberOfSamples is zero, generate the number of samples remaining for the current tick
+        val samplesToGenerate = if (numberOfSamples == 0) (this.samplesPerTick - this.samplePosition).toInt() else numberOfSamples
+        val samplesToReturn = arrayListOf<Pair<Byte, Byte>>()
 
-        var leftSample = 0
-        var rightSample = 0
+        for (i in 0..samplesToGenerate) {
+            recalculateSongPosition()
+            applyNewRowData()
+            applyPerTickEffects()
 
-        this.channelAudioGenerators.forEachIndexed { i, generator ->
-            if (currentChannelIsPlaying(i)) {
-                val nextSample = generator.getNextSample()
-                leftSample += nextSample.first
-                rightSample += nextSample.second
+            var leftSample = 0
+            var rightSample = 0
+
+            this.channelAudioGenerators.forEachIndexed { j, generator ->
+                if (currentChannelIsPlaying(j)) {
+                    val nextSample = generator.getNextSample()
+                    leftSample += nextSample.first
+                    rightSample += nextSample.second
+                }
             }
+
+            samplesToReturn.add(
+                Pair(
+                    leftSample.coerceAtLeast(Byte.MIN_VALUE.toInt()).coerceAtMost(Byte.MAX_VALUE.toInt()).toByte(),
+                    rightSample.coerceAtLeast(Byte.MIN_VALUE.toInt()).coerceAtMost(Byte.MAX_VALUE.toInt()).toByte()
+                )
+            )
+
+            this.samplePosition++
         }
 
-        this.samplePosition++
-
-        return Pair(
-            leftSample.coerceAtMost(Byte.MAX_VALUE.toInt()).coerceAtLeast(Byte.MIN_VALUE.toInt()).toByte(),
-            rightSample.coerceAtMost(Byte.MAX_VALUE.toInt()).coerceAtLeast(Byte.MIN_VALUE.toInt()).toByte()
-        )
+        return samplesToReturn
     }
 
     /**
@@ -101,7 +108,7 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
      */
     private fun recalculateSongPosition() {
         // Update tick position, if needed
-        if (this.samplePosition > this.samplesPerTick) {
+        if (this.samplePosition >= this.samplesPerTick) {
             this.samplePosition = 0
             this.tickPosition++
         }

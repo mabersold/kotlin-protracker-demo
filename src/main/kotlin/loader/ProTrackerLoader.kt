@@ -7,6 +7,7 @@ import model.Pattern
 import model.ProTrackerModule
 import model.Row
 import model.PanningPosition
+import java.io.File
 import java.nio.ByteBuffer
 import kotlin.experimental.and
 
@@ -16,18 +17,18 @@ class ProTrackerLoader {
         private const val INSTRUMENT_NAME_LENGTH = 22
         private const val NUMBER_OF_INSTRUMENTS = 31
         private const val ORDER_LIST_MAX_LENGTH = 128
+        private const val SPACE_DEBRIS = "space_debris.mod"
+        private const val PROTRACKER_IDENTIFIER = "M.K."
     }
 
-    private lateinit var loadingBuffer: ByteBuffer
+    fun loadModule(fileName: String? = null): ProTrackerModule {
+        val loadingBuffer = prepareBuffer(fileName)
 
-    fun loadModule(fileName: String): ProTrackerModule {
-        prepareBuffer(fileName)
-
-        val songTitle = getString(TITLE_LENGTH)
+        val songTitle = getString(TITLE_LENGTH, loadingBuffer)
         val instruments = arrayListOf<Instrument>()
 
         repeat(NUMBER_OF_INSTRUMENTS) {
-            instruments.add(getInstrument())
+            instruments.add(getInstrument(loadingBuffer))
         }
 
         val numberOfSongPositions = loadingBuffer.get()
@@ -39,7 +40,11 @@ class ProTrackerLoader {
             orderList.add(loadingBuffer.get().toInt())
         }
 
-        val identifier = getString(4)
+        val identifier = getString(4, loadingBuffer)
+
+        if (PROTRACKER_IDENTIFIER != identifier) {
+            throw RuntimeException("Could not validate file as a Protracker module. Expected identifier $PROTRACKER_IDENTIFIER but was $identifier. Terminating.")
+        }
 
         val patterns = arrayListOf<Pattern>()
 
@@ -73,32 +78,35 @@ class ProTrackerLoader {
         return ProTrackerModule(songTitle, orderList, patterns, instruments, numberOfSongPositions, noiseTrackerRestartPosition, identifier)
     }
 
-    private fun getString(length: Int): String {
+    private fun getString(length: Int, buffer: ByteBuffer): String {
         val builder = StringBuilder()
 
         repeat(length) {
-            builder.append(Char(loadingBuffer.get().toInt()))
+            builder.append(Char(buffer.get().toInt()))
         }
 
         return builder.toString().trimEnd(Char.MIN_VALUE)
     }
 
-    private fun getInstrument(): Instrument {
-        val instrumentName = getString(INSTRUMENT_NAME_LENGTH)
-        val instrumentLength = loadingBuffer.short
-        val fineTune = signedNibble(loadingBuffer.get())
-        val volume = loadingBuffer.get()
-        val repeatOffsetStart = loadingBuffer.short
-        val repeatLength = loadingBuffer.short
+    private fun getInstrument(buffer: ByteBuffer): Instrument {
+        val instrumentName = getString(INSTRUMENT_NAME_LENGTH, buffer)
+        val instrumentLength = buffer.short
+        val fineTune = signedNibble(buffer.get())
+        val volume = buffer.get()
+        val repeatOffsetStart = buffer.short
+        val repeatLength = buffer.short
 
         return Instrument(instrumentName, instrumentLength, fineTune, volume, repeatOffsetStart, repeatLength)
     }
 
-    private fun prepareBuffer(fileName: String) {
-        val fileBytes = javaClass.classLoader.getResourceAsStream(fileName)!!.readBytes()
-        loadingBuffer = ByteBuffer.allocate(fileBytes.size)
-        loadingBuffer.put(fileBytes)
-        loadingBuffer.rewind()
+    private fun prepareBuffer(fileName: String?): ByteBuffer {
+        val fileBytes = if (fileName == null) {
+            javaClass.classLoader.getResourceAsStream(SPACE_DEBRIS)!!.readBytes()
+        } else {
+            File(fileName).readBytes()
+        }
+
+        return ByteBuffer.allocate(fileBytes.size).put(fileBytes).rewind()
     }
 
     private fun getRow(bufferData: ByteArray): Row {

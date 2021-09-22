@@ -1,10 +1,11 @@
 package player
 
+import model.Constants.SAMPLING_RATE
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioSystem
 
 class AudioPlayer {
-    private val audioFormat: AudioFormat = AudioFormat(44100.0F, 8, 2, true, true)
+    private val audioFormat: AudioFormat = AudioFormat(SAMPLING_RATE.toFloat(), 8, 2, true, true)
     private val audioLine = AudioSystem.getSourceDataLine(audioFormat)
 
     init {
