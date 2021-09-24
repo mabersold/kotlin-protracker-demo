@@ -33,7 +33,7 @@ class ChannelAudioGenerator(
     private var isInstrumentPlaying: Boolean = false
 
     // Effect state variables
-    private var currentVolume: Byte = 0
+    private var currentVolume: Int = 0
     private var currentEffect: EffectType = EffectType.UNKNOWN_EFFECT
     private var effectXValue: Int = 0
     private var effectYValue: Int = 0
@@ -68,7 +68,7 @@ class ChannelAudioGenerator(
 
         val actualSample = this.resampler.getInterpolatedSample()
 
-        val volumeAdjustedSample = if (this.currentVolume == 64.toByte()) {
+        val volumeAdjustedSample = if (this.currentVolume == 64) {
             actualSample
         } else {
             actualSample * (this.currentVolume / 64.0F)
@@ -96,11 +96,11 @@ class ChannelAudioGenerator(
     fun applyStartOfRowEffects() {
         this.currentVolume = when(this.currentEffect) {
             EffectType.FINE_VOLUME_SLIDE_UP ->
-                (this.currentVolume + this.effectYValue).coerceAtMost(64).toByte()
+                (this.currentVolume + this.effectYValue).coerceAtMost(64)
             EffectType.FINE_VOLUME_SLIDE_DOWN ->
-                (this.currentVolume - this.effectYValue).coerceAtLeast(0).toByte()
+                (this.currentVolume - this.effectYValue).coerceAtLeast(0)
             EffectType.SET_VOLUME ->
-                (this.effectXValue * 16 + this.effectYValue).coerceAtMost(64).toByte()
+                (this.effectXValue * 16 + this.effectYValue).coerceAtMost(64)
             else -> this.currentVolume
         }
 
@@ -204,11 +204,11 @@ class ChannelAudioGenerator(
     private fun getStereoSample(sample: Float): Pair<Float, Float> =
         if (PanningPosition.LEFT == this.panningPosition) Pair(sample, 0.0F) else Pair(0.0F, sample)
 
-    private fun applyVolumeSlideAdjustment(xValue: Int, yValue: Int, volume: Byte) =
+    private fun applyVolumeSlideAdjustment(xValue: Int, yValue: Int, volume: Int) =
         if (xValue > 0) {
-            (xValue + volume).coerceAtMost(64).toByte()
+            (xValue + volume).coerceAtMost(64)
         } else {
-            (volume - yValue).coerceAtLeast(0).toByte()
+            (volume - yValue).coerceAtLeast(0)
         }
 
     private fun applySlideToNoteAdjustment() {
