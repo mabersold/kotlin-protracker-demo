@@ -70,8 +70,11 @@ class ProTrackerLoader {
 
         for (instrument in instruments) {
             if (instrument.length > 0) {
-                instrument.audioData = ByteArray(instrument.length * 2)
-                loadingBuffer.get(instrument.audioData)
+                val byteAudioData = ByteArray(instrument.length * 2)
+                loadingBuffer.get(byteAudioData)
+                byteAudioData.forEach { byte ->
+                    instrument.floatAudioData.add(byte / Byte.MAX_VALUE.toFloat())
+                }
             }
         }
 

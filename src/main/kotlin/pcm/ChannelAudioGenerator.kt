@@ -40,10 +40,10 @@ class ChannelAudioGenerator(
 
     // State variables for specific effect types
     private var slideToNotePeriodShift: Int = 0
-    private var vibratoCyclesPerRow: Double = 0.0
+    private var vibratoCyclesPerRow: Float = 0.0F
     private var vibratoDepth: Int = 0
-    private var vibratoSamplesPerCyclePosition: Double = 0.0
-    private var vibratoSamplesPerCycle: Double = 0.0
+    private var vibratoSamplesPerCyclePosition: Float = 0.0F
+    private var vibratoSamplesPerCycle: Float = 0.0F
     private var vibratoSamplesElapsed: Int = 0
 
     companion object {
@@ -55,9 +55,9 @@ class ChannelAudioGenerator(
      *
      * Vibrato effects are applied in here as well, since those need to be handled per-sample rather than per-tick.
      */
-    fun getNextSample(): Pair<Byte, Byte> {
+    fun getNextSample(): Pair<Float, Float> {
         if (!this.isInstrumentPlaying) {
-            return Pair(0, 0)
+            return Pair(0.0F, 0.0F)
         }
 
         val vibratoPeriodAdjustment = getVibratoPeriodAdjustment()
@@ -67,7 +67,12 @@ class ChannelAudioGenerator(
         }
 
         val actualSample = this.resampler.getInterpolatedSample()
-        val volumeAdjustedSample = applyVolume(actualSample, currentVolume)
+
+        val volumeAdjustedSample = if (this.currentVolume == 64.toByte()) {
+            actualSample
+        } else {
+            actualSample * (this.currentVolume / 64.0F)
+        }
 
         if (this.currentEffect == EffectType.VIBRATO) {
             this.vibratoSamplesElapsed = getUpdatedVibratoSamplesElapsed()
@@ -100,7 +105,7 @@ class ChannelAudioGenerator(
         }
 
         if (EffectType.INSTRUMENT_OFFSET == this.currentEffect) {
-            this.resampler.audioDataReference = (this.effectXValue * 4096 + this.effectYValue * 256).toDouble()
+            this.resampler.audioDataReference = (this.effectXValue * 4096 + this.effectYValue * 256).toFloat()
         }
     }
 
@@ -196,8 +201,8 @@ class ChannelAudioGenerator(
      * Protracker panning is very simple: it's either left channel or right channel. All we need to do is respond with the
      * sample in the pair's first field for left panning, or second field for right panning.
      */
-    private fun getStereoSample(sample: Byte): Pair<Byte, Byte> =
-        if (PanningPosition.LEFT == this.panningPosition) Pair(sample, 0) else Pair(0, sample)
+    private fun getStereoSample(sample: Float): Pair<Float, Float> =
+        if (PanningPosition.LEFT == this.panningPosition) Pair(sample, 0.0F) else Pair(0.0F, sample)
 
     private fun applyVolumeSlideAdjustment(xValue: Int, yValue: Int, volume: Byte) =
         if (xValue > 0) {
@@ -239,10 +244,10 @@ class ChannelAudioGenerator(
     private fun updateVibratoState(xValue: Int, yValue: Int, continueActiveVibrato: Boolean) {
         this.vibratoSamplesElapsed = if (continueActiveVibrato) this.vibratoSamplesElapsed else 0
 
-        this.vibratoCyclesPerRow = if (xValue == 0) this.vibratoCyclesPerRow else xValue * this.ticksPerRow / 64.0
+        this.vibratoCyclesPerRow = if (xValue == 0) this.vibratoCyclesPerRow else xValue * this.ticksPerRow / 64.0F
         this.vibratoDepth = if (yValue == 0) this.vibratoDepth else yValue
 
-        val samplesPerRow = (SAMPLING_RATE / (beatsPerMinute / 60.0)) / 4
+        val samplesPerRow = (SAMPLING_RATE / (beatsPerMinute / 60.0F)) / 4
 
         this.vibratoSamplesPerCycle = samplesPerRow * this.vibratoCyclesPerRow.pow(-1)
         this.vibratoSamplesPerCyclePosition = this.vibratoSamplesPerCycle / 64

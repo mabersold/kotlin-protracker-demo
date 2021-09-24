@@ -23,8 +23,8 @@ fun main(args: Array<String>) {
                 sampleBuffer.clear()
             }
 
-            sampleBuffer.put(it.first)
-            sampleBuffer.put(it.second)
+            sampleBuffer.putShort(it.first)
+            sampleBuffer.putShort(it.second)
         }
     }
 

@@ -7,5 +7,5 @@ data class Instrument(
     val volume: Byte,
     val repeatOffsetStart: Short,
     val repeatLength: Short,
-    var audioData: ByteArray? = null
+    var floatAudioData: ArrayList<Float> = arrayListOf()
 )
