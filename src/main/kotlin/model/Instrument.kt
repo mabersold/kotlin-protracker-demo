@@ -3,9 +3,9 @@ package model
 data class Instrument(
     val name: String,
     val length: Short,
-    val fineTune: Byte,
-    val volume: Byte,
+    val fineTune: Int,
+    val volume: Int,
     val repeatOffsetStart: Short,
     val repeatLength: Short,
-    var audioData: ByteArray? = null
+    val audioData: ArrayList<Float> = arrayListOf()
 )

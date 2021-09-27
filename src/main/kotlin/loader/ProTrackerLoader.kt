@@ -70,8 +70,11 @@ class ProTrackerLoader {
 
         for (instrument in instruments) {
             if (instrument.length > 0) {
-                instrument.audioData = ByteArray(instrument.length * 2)
-                loadingBuffer.get(instrument.audioData)
+                val byteAudioData = ByteArray(instrument.length * 2)
+                loadingBuffer.get(byteAudioData)
+                byteAudioData.forEach { byte ->
+                    instrument.audioData.add(byte / Byte.MAX_VALUE.toFloat())
+                }
             }
         }
 
@@ -92,7 +95,7 @@ class ProTrackerLoader {
         val instrumentName = getString(INSTRUMENT_NAME_LENGTH, buffer)
         val instrumentLength = buffer.short
         val fineTune = signedNibble(buffer.get())
-        val volume = buffer.get()
+        val volume = buffer.get().toInt()
         val repeatOffsetStart = buffer.short
         val repeatLength = buffer.short
 
@@ -140,15 +143,15 @@ class ProTrackerLoader {
         return Row(instrumentNumber, period, effectType, xValue, yValue)
     }
 
-    private fun signedNibble(data: Byte): Byte {
+    private fun signedNibble(data: Byte): Int {
         //get rid of the upper 4 bits
         val nibble = data.and(15)
 
         //if first bit is 1, it's a negative number
         return if (nibble.and(8) == 8.toByte() ) {
-            (nibble - 16).toByte()
+            (nibble - 16)
         } else {
-            nibble
+            nibble.toInt()
         }
     }
 }

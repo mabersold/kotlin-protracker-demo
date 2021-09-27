@@ -1,6 +1,5 @@
 package pcm
 
-import model.Constants
 import model.Constants.SAMPLING_RATE
 import model.EffectType
 import model.ProTrackerModule
@@ -44,22 +43,22 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
     /**
      * Retrieves the next set of samples in the song, mixing the results from each channel audio generator
      */
-    fun generateNextSamples(numberOfSamples: Int = 0): List<Pair<Byte, Byte>> {
+    fun generateNextSamples(numberOfSamples: Int = 0): List<Pair<Short, Short>> {
         if (!songStillActive()) {
             return listOf(Pair(0, 0))
         }
 
         // if numberOfSamples is zero, generate the number of samples remaining for the current tick
         val samplesToGenerate = if (numberOfSamples == 0) (this.samplesPerTick - this.samplePosition).toInt() else numberOfSamples
-        val samplesToReturn = arrayListOf<Pair<Byte, Byte>>()
+        val samplesToReturn = arrayListOf<Pair<Short, Short>>()
 
         for (i in 0..samplesToGenerate) {
             recalculateSongPosition()
             applyNewRowData()
             applyPerTickEffects()
 
-            var leftSample = 0
-            var rightSample = 0
+            var leftSample = 0.0F
+            var rightSample = 0.0F
 
             this.channelAudioGenerators.forEachIndexed { j, generator ->
                 if (currentChannelIsPlaying(j)) {
@@ -71,8 +70,8 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
 
             samplesToReturn.add(
                 Pair(
-                    leftSample.coerceAtLeast(Byte.MIN_VALUE.toInt()).coerceAtMost(Byte.MAX_VALUE.toInt()).toByte(),
-                    rightSample.coerceAtLeast(Byte.MIN_VALUE.toInt()).coerceAtMost(Byte.MAX_VALUE.toInt()).toByte()
+                    convertTo16Bit(leftSample),
+                    convertTo16Bit(rightSample)
                 )
             )
 
@@ -221,4 +220,7 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
 
     private fun currentChannelIsPlaying(channelNumber: Int): Boolean =
         this.soloChannels.isEmpty() || this.soloChannels.contains(channelNumber)
+
+    private fun convertTo16Bit(sample: Float): Short =
+        (sample * 32767).toInt().coerceAtMost(32767).coerceAtLeast(-32768).toShort()
 }
