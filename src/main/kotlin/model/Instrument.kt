@@ -7,5 +7,5 @@ data class Instrument(
     val volume: Int,
     val repeatOffsetStart: Short,
     val repeatLength: Short,
-    var floatAudioData: ArrayList<Float> = arrayListOf()
+    val audioData: ArrayList<Float> = arrayListOf()
 )

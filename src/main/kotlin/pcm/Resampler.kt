@@ -34,13 +34,13 @@ class Resampler {
      * 5. Multiply the slope by our current position in the run and add to the sample, which is returned as a byte
      */
     fun getInterpolatedSample(): Float {
-        if (audioDataReference >= (instrument?.floatAudioData?.size ?: 0)) {
+        if (audioDataReference >= (instrument?.audioData?.size ?: 0)) {
             return 0.0F
         }
 
         // 1: Get sample and subsequent sample from the audio data
         val flooredReference = floor(audioDataReference).toInt()
-        val sample = instrument?.floatAudioData?.get(flooredReference) ?: 0.0F
+        val sample = instrument?.audioData?.get(flooredReference) ?: 0.0F
         val subsequentSample = getSubsequentSample(instrument, flooredReference)
 
         // 2: Determine the rise
@@ -74,16 +74,16 @@ class Resampler {
      * for an unlooped instrument, or return whatever is at the repeat offset for a looped instrument.
      */
     private fun getSubsequentSample(instrument: Instrument?, currentSamplePosition: Int): Float {
-        if (currentSamplePosition + 1 >= (instrument?.floatAudioData?.size ?: 0)) {
+        if (currentSamplePosition + 1 >= (instrument?.audioData?.size ?: 0)) {
             if (!isInstrumentLooped(instrument)) {
                 return 0.0F
             }
 
             //if the instrument is looped, return whatever value is at the repeat offset start
-            return instrument?.floatAudioData?.get(instrument.repeatOffsetStart * 2) ?: 0.0F
+            return instrument?.audioData?.get(instrument.repeatOffsetStart * 2) ?: 0.0F
         }
 
-        return instrument?.floatAudioData?.get(currentSamplePosition + 1) ?: 0.0F
+        return instrument?.audioData?.get(currentSamplePosition + 1) ?: 0.0F
     }
 
     private fun isInstrumentLooped(instrument: Instrument?) =
@@ -98,7 +98,7 @@ class Resampler {
      */
     private fun getNextAudioDataReference(reference: Float, step: Float, instrument: Instrument?): Float {
         var newReference = reference + step
-        if (isInstrumentLooped(instrument) &&  floor(newReference).toInt() >= (instrument?.floatAudioData?.size ?: 0)) {
+        if (isInstrumentLooped(instrument) &&  floor(newReference).toInt() >= (instrument?.audioData?.size ?: 0)) {
             val referenceRemainder = newReference - floor(newReference)
             newReference = ((instrument?.repeatOffsetStart ?: 0) * 2.0F) + referenceRemainder
         }
