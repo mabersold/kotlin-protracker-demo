@@ -3,6 +3,7 @@ package pcm
 import model.Constants.INSTRUMENT_STARTING_REFERENCE
 import model.Instrument
 import kotlin.math.floor
+import kotlin.math.pow
 
 /**
  * Used to calculate a sample from the given instrument data. Contains the following fields:
@@ -17,6 +18,7 @@ import kotlin.math.floor
 class Resampler {
     companion object {
         private const val PAL_CLOCK_RATE = 7093789.2F
+        private const val TRIAMU_RATIO = 1.007246412F
     }
 
     var audioDataReference: Float = INSTRUMENT_STARTING_REFERENCE
@@ -34,28 +36,28 @@ class Resampler {
      * 5. Multiply the slope by our current position in the run and add to the sample, which is returned as a byte
      */
     fun getInterpolatedSample(): Float {
-        if (audioDataReference >= (instrument?.audioData?.size ?: 0)) {
+        if (this.audioDataReference >= (this.instrument?.audioData?.size ?: 0)) {
             return 0.0F
         }
 
         // 1: Get sample and subsequent sample from the audio data
-        val flooredReference = floor(audioDataReference).toInt()
-        val sample = instrument?.audioData?.get(flooredReference) ?: 0.0F
-        val subsequentSample = getSubsequentSample(instrument, flooredReference)
+        val flooredReference = floor(this.audioDataReference).toInt()
+        val sample = this.instrument?.audioData?.get(flooredReference) ?: 0.0F
+        val subsequentSample = getSubsequentSample(this.instrument, flooredReference)
 
         // 2: Determine the rise
         val rise = subsequentSample - sample
 
         // 3: Determine the run.
-        val stepsSinceFirstStep = floor((audioDataReference - flooredReference) / step).toInt()
-        val remainingSteps = floor((flooredReference + 1 - audioDataReference) / step).toInt()
+        val stepsSinceFirstStep = floor((this.audioDataReference - flooredReference) / this.step).toInt()
+        val remainingSteps = floor((flooredReference + 1 - this.audioDataReference) / this.step).toInt()
         val run = remainingSteps + stepsSinceFirstStep + 1
 
         // 4: Calculate the slope
         val slope = rise / run
 
         // 4.5: Update the audio data reference before we return the sample
-        audioDataReference = getNextAudioDataReference(audioDataReference, step, instrument)
+        this.audioDataReference = getNextAudioDataReference(this.audioDataReference, this.step, this.instrument)
 
         // 5: Multiply the slop by our current position in the run and add to the sample, and return
         return sample + (slope * stepsSinceFirstStep)
@@ -65,8 +67,8 @@ class Resampler {
      * Recalculates the step: Since the step is the key for determining the pitch, whenever the pitch changes, we will
      * need to recalculate the step.
      */
-    fun recalculateStep(period: Int, samplingRate: Float) {
-        step = PAL_CLOCK_RATE / (period * 2) / samplingRate
+    fun recalculateStep(period: Int, samplingRate: Float, fineTune: Int = 0) {
+        this.step = (PAL_CLOCK_RATE / (period * 2)) * fineTuneAdjustment(fineTune) / samplingRate
     }
 
     /**
@@ -104,5 +106,13 @@ class Resampler {
         }
 
         return newReference
+    }
+
+    private fun fineTuneAdjustment(fineTune: Int): Float {
+        if (fineTune == 0) {
+            return 1.0F
+        }
+
+        return TRIAMU_RATIO.pow(fineTune)
     }
 }

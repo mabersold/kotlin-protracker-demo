@@ -31,6 +31,7 @@ class ChannelAudioGenerator(
     private var actualPeriod: Int = 0
     private var specifiedPeriod: Int = 0
     private var isInstrumentPlaying: Boolean = false
+    private var fineTune: Int = 0
 
     // Effect state variables
     private var currentVolume: Int = 0
@@ -63,16 +64,12 @@ class ChannelAudioGenerator(
         val vibratoPeriodAdjustment = getVibratoPeriodAdjustment()
         if (vibratoPeriodAdjustment != 0 && this.actualPeriod != this.specifiedPeriod + vibratoPeriodAdjustment) {
             this.actualPeriod = this.specifiedPeriod + vibratoPeriodAdjustment
-            this.resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
+            this.resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE, this.fineTune)
         }
 
         val actualSample = this.resampler.getInterpolatedSample()
 
-        val volumeAdjustedSample = if (this.currentVolume == 64) {
-            actualSample
-        } else {
-            actualSample * (this.currentVolume / 64.0F)
-        }
+        val volumeAdjustedSample = applyVolume(actualSample, this.currentVolume)
 
         if (this.currentEffect == EffectType.VIBRATO) {
             this.vibratoSamplesElapsed = getUpdatedVibratoSamplesElapsed()
@@ -126,13 +123,13 @@ class ChannelAudioGenerator(
                 val periodAdjustment = this.effectXValue * 16 + this.effectYValue
                 this.actualPeriod = (this.actualPeriod - periodAdjustment).coerceAtLeast(113)
                 this.specifiedPeriod = this.actualPeriod
-                resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
+                resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE, this.fineTune)
             }
             EffectType.PITCH_SLIDE_DOWN -> {
                 val periodAdjustment = this.effectXValue * 16 + this.effectYValue
                 this.actualPeriod = (this.actualPeriod + periodAdjustment).coerceAtMost(856)
                 this.specifiedPeriod = this.actualPeriod
-                this.resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
+                this.resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE, this.fineTune)
             }
             else -> return
         }
@@ -178,8 +175,9 @@ class ChannelAudioGenerator(
             resampler.audioDataReference = INSTRUMENT_STARTING_REFERENCE
         }
 
+        this.fineTune = getFineTuneValue(this.activeInstrument, row)
         this.isInstrumentPlaying = true
-        this.resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
+        this.resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE, this.fineTune)
     }
 
     /**
@@ -187,12 +185,12 @@ class ChannelAudioGenerator(
      * with the sample at the original value that it was already at. For anything below 64, it determines the volume ratio
      * and multiplies the sample by that. A volume value of zero will result in a sample value of zero.
      */
-    private fun applyVolume(actualSample: Byte, volume: Byte): Byte {
-        if (volume == 64.toByte()) {
+    private fun applyVolume(actualSample: Float, volume: Int): Float {
+        if (volume == 64) {
             return actualSample
         }
 
-        return (actualSample * (volume / 64.0)).roundToInt().toByte()
+        return (actualSample * (volume / 64.0F))
     }
 
     /**
@@ -221,7 +219,7 @@ class ChannelAudioGenerator(
             this.actualPeriod = (this.actualPeriod + periodShift).coerceAtMost(this.specifiedPeriod)
         }
 
-        resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
+        resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE, this.fineTune)
     }
 
     private fun updateEffect(effectType: EffectType, xValue: Int, yValue: Int) {
@@ -271,5 +269,18 @@ class ChannelAudioGenerator(
             0
         else
             this.vibratoSamplesElapsed + 1
+    }
+
+    // If a row has a fine tune value effect, return the value from that effect, otherwise return the instrument's default fine tune value
+    private fun getFineTuneValue(instrument: Instrument, row: Row): Int {
+        if (EffectType.SET_FINE_TUNE == row.effect) {
+            return if (row.effectYValue >= 8) {
+                row.effectYValue - 16
+            } else {
+                row.effectYValue
+            }
+        }
+
+        return instrument.fineTune
     }
 }
