@@ -25,8 +25,9 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
     private var tickPosition = 0
     private var rowPosition = 0
     private var currentlyPlayingPatternNumber = this.orderList[this.orderListPosition]
-    private var nextRowPosition = 0
-    private var nextRowPattern = this.currentlyPlayingPatternNumber
+    private var nextRowNumber = 0
+    private var nextRowPatternNumber = this.currentlyPlayingPatternNumber
+    private var nextRowOrderListPosition = 0
 
     init {
         //Generate channel audio generators for each channel in the module
@@ -100,7 +101,7 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
     }
 
     /**
-     * This function is how we keep track of our position in the song. The samplePosition counter is increased every
+     * Keep track of our current song position. Called once per sample generated. The samplePosition counter is increased every
      * time we generate a new sample. In this function, if we have exceeded samples per tick, increase the tick number.
      * If we have exceeded the number of ticks per row, advance to the next row and calculate what the new next row
      * will be.
@@ -115,40 +116,45 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         // Update row position, order list position, and current pattern number, if needed
         if (this.tickPosition >= this.ticksPerRow) {
             this.tickPosition = 0
-            this.rowPosition = this.nextRowPosition
-            this.currentlyPlayingPatternNumber = this.nextRowPattern
+            this.rowPosition = this.nextRowNumber
+            this.currentlyPlayingPatternNumber = this.nextRowPatternNumber
+            this.orderListPosition = this.nextRowOrderListPosition
             determineNextRow()
         }
     }
 
     /**
-     * This function determines what our next row will be. If we are at the last row of the song, set to -1. If we are
-     * at the last row of the pattern but not the last row of the song, the next row will either be the first row of the
-     * next pattern in the order list, or whatever the pattern break specifies (if the effect is present in the row). In
-     * all other cases, the next row position is just the current row position + 1.
+     * Calculate the next row of the song. If we are at the last row of the song, set to -1. If we are at the last row of
+     * the pattern but not the last row of the song, the next row will either be the first row of the next pattern in the
+     * order list, or whatever the pattern break specifies (if the effect is present in the row). In all other cases, the
+     * next row position is just the current row position + 1.
      */
     private fun determineNextRow() {
         if (!songStillActive()) {
             return
         }
 
-        val isLastRowOfPattern = this.rowPosition == 63 || rowHasGlobalEffect(EffectType.PATTERN_BREAK, this.module, this.currentlyPlayingPatternNumber, this.rowPosition)
+        val isLastRowOfPattern = this.rowPosition == 63 || rowHasGlobalEffect(EffectType.PATTERN_BREAK, this.module, this.currentlyPlayingPatternNumber, this.rowPosition) || rowHasGlobalEffect(EffectType.POSITION_JUMP, this.module, this.currentlyPlayingPatternNumber, this.rowPosition)
         val isLastRowOfSong = isLastRowOfPattern && (this.orderListPosition + 1 >= this.orderList.size)
 
         if (isLastRowOfSong) {
-            this.nextRowPosition = -1
-            this.nextRowPattern = -1
+            this.nextRowNumber = -1
+            this.nextRowPatternNumber = -1
         } else if (isLastRowOfPattern) {
             val patternBreakRow = getRowWithGlobalEffect(this.rowPosition, EffectType.PATTERN_BREAK, this.currentlyPlayingPatternNumber, this.module)
+            val positionJumpRow = getRowWithGlobalEffect(this.rowPosition, EffectType.POSITION_JUMP, this.currentlyPlayingPatternNumber, this.module)
 
-            this.nextRowPosition = (((patternBreakRow?.effectXValue ?: (0 * 10)) + (patternBreakRow?.effectYValue ?: 0))).coerceAtMost(63)
-            this.nextRowPattern = this.orderList[this.orderListPosition + 1]
-            this.orderListPosition++
+            this.nextRowNumber = (((patternBreakRow?.effectXValue ?: 0) * 10) + (patternBreakRow?.effectYValue ?: 0)).coerceAtMost(63)
+            this.nextRowOrderListPosition = getNextOrderListPosition(positionJumpRow, this.orderListPosition)
+            this.nextRowPatternNumber = this.orderList[this.nextRowOrderListPosition]
         } else {
-            this.nextRowPosition = this.rowPosition + 1
+            this.nextRowNumber = this.rowPosition + 1
         }
     }
 
+    /**
+     * Apply per tick effects. Most of the work is done by the channel audio generators.
+     */
     private fun applyPerTickEffects() {
         if (!isStartOfNewTick()) {
             return
@@ -161,6 +167,9 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         }
     }
 
+    /**
+     * Calculate how many samples should be generated per tick
+     */
     private fun getSamplesPerTick(): Double {
         val beatsPerSecond = this.beatsPerMinute.toDouble() / 60.0
         val samplesPerBeat = SAMPLING_RATE / beatsPerSecond
@@ -168,9 +177,17 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         return samplesPerRow / this.ticksPerRow
     }
 
+    /**
+     * Determines whether the current position is the start of a new tick. Note that this will return false on tick 0
+     * of a new row - this is important for applying per-tick effects, which are typically not applied during the first
+     * tick.
+     */
     private fun isStartOfNewTick(): Boolean =
         songStillActive() && this.samplePosition == 0 && this.tickPosition != 0
 
+    /**
+     * Determines whether the current position is the start of a new row.
+     */
     private fun isStartOfNewRow(): Boolean =
         songStillActive() && this.tickPosition == 0 && this.samplePosition == 0
 
@@ -191,6 +208,10 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         }
     }
 
+    /**
+     * When a speed change effect is specified, change the speed of the song and calculate new ticksPerRow and beatsPerMinute
+     * Channel audio generators must be aware of the speed change since that is used in vibrato effects
+     */
     private fun applySpeedChange(rowNumber: Int) {
         val speedChangeRow = getRowWithGlobalEffect(rowNumber, EffectType.CHANGE_SPEED, this.currentlyPlayingPatternNumber, this.module) ?: return
 
@@ -208,19 +229,45 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
         }
     }
 
+    /**
+     * Returns true if the row has the specified global effect
+     */
     private fun rowHasGlobalEffect(effect: EffectType, module: ProTrackerModule, patternNumber: Int, rowNumber: Int): Boolean =
         module.patterns[patternNumber].channels.any { channel ->
             effect == channel.rows[rowNumber].effect
         }
 
+    /**
+     * Returns a row at the specified song position that has a specified effect. If more than one row has the specified
+     * effect, it will return the last one in the list. If no row has the effect, it will return null.
+     */
     private fun getRowWithGlobalEffect(rowNumber: Int, effect: EffectType, patternNumber: Int, module: ProTrackerModule): Row? =
         module.patterns[patternNumber].channels.findLast { channel ->
             effect == channel.rows[rowNumber].effect
         }?.rows?.get(rowNumber)
 
+    /**
+     * Determines whether a specified channel number should be playing. If no channels are soloed, returns true.
+     */
     private fun currentChannelIsPlaying(channelNumber: Int): Boolean =
         this.soloChannels.isEmpty() || this.soloChannels.contains(channelNumber)
 
+    /**
+     * Converts the incoming sample, as a float, into a 16-bit short. This is the final step of our audio generation -
+     * the calling function receives a collection of 16-bit values for the PCM audio data, which is then sent to the
+     * output device.
+     */
     private fun convertTo16Bit(sample: Float): Short =
         (sample * 32767).toInt().coerceAtMost(32767).coerceAtLeast(-32768).toShort()
+
+    /**
+     * Determines the next position in the order list. If there is a non-null row with a position jump effect, the next
+     * order list position is determined by the position jump effect in that row. Otherwise, it's just one higher than
+     * the current order list position
+     */
+    private fun getNextOrderListPosition(rowWithPositionJump: Row?, currentOrderListPosition: Int): Int =
+        if (rowWithPositionJump != null)
+            (rowWithPositionJump.effectXValue * 16 + rowWithPositionJump.effectYValue).coerceAtMost(127).coerceAtLeast(0)
+        else
+            currentOrderListPosition + 1
 }

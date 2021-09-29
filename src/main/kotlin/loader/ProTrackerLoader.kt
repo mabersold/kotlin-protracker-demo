@@ -21,6 +21,11 @@ class ProTrackerLoader {
         private const val PROTRACKER_IDENTIFIER = "M.K."
     }
 
+    /**
+     * Loads the module from the given file. If no file is specified, loads, space debris (included in the repo).
+     *
+     * For reference on the file format, see mod_format_descriptor.txt
+     */
     fun loadModule(fileName: String? = null): ProTrackerModule {
         val loadingBuffer = prepareBuffer(fileName)
 
@@ -128,6 +133,7 @@ class ProTrackerLoader {
             5 -> EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE
             9 -> EffectType.INSTRUMENT_OFFSET
             10 -> EffectType.VOLUME_SLIDE
+            11 -> EffectType.POSITION_JUMP
             12 -> EffectType.SET_VOLUME
             13 -> EffectType.PATTERN_BREAK
             14 -> {

@@ -8,7 +8,6 @@ import model.PanningPosition
 import model.Row
 import kotlin.math.floor
 import kotlin.math.pow
-import kotlin.math.roundToInt
 
 /**
  * ChannelAudioGenerator - manages the state of an individual channel. Maintains information about the current note,
@@ -48,6 +47,8 @@ class ChannelAudioGenerator(
     private var vibratoSamplesElapsed: Int = 0
 
     companion object {
+        // This is used to calculate a vibrato in a sine waveform. While I could do the sine math myself, this is
+        // how ProTracker implemented it - and therefore how I will implement it.
         private val SINE_TABLE = arrayListOf(0, 24, 49, 74, 97, 120, 141, 161, 180, 197, 212, 224, 235, 244, 250, 253, 255, 253, 250, 244, 235, 224, 212, 197, 180, 161, 141, 120, 97, 74, 49, 24, 0, -24, -49, -74, -97, -120, -141, -161, -180, -197, -212, -224, -235, -244, -250, -253, -255, -253, -250, -244, -235, -224, -212, -197, -180, -161, -141, -120, -97, -74, -49, -24)
     }
 
@@ -135,6 +136,13 @@ class ChannelAudioGenerator(
         }
     }
 
+    /**
+     * Updates the instrument for a new row. If no new instrument is specified, retain current instrument data.
+     *
+     * If a new instrument number is specified, replace the current instrument with the new instrument.
+     *
+     * In either case, if any instrument number is specified, set the current volume to the active instrument's volume.
+     */
     private fun updateInstrument(row: Row, instruments: List<Instrument>) {
         if (row.instrumentNumber == 0) {
             return
@@ -161,6 +169,10 @@ class ChannelAudioGenerator(
         this.currentVolume = this.activeInstrument.volume
     }
 
+    /**
+     * Updates the period (aka the note, or pitch) to the period of the given row. Immediately change the period to the
+     * given row's period, unless a slide to note effect is specified.
+     */
     private fun updatePeriod(row: Row) {
         if (row.period == 0) {
             return
@@ -183,7 +195,8 @@ class ChannelAudioGenerator(
     /**
      * Accepts the sample and responds with a volume-adjusted sample. Maximum volume is 64 - at 64, it will simply respond
      * with the sample at the original value that it was already at. For anything below 64, it determines the volume ratio
-     * and multiplies the sample by that. A volume value of zero will result in a sample value of zero.
+     * and multiplies the sample by that. A volume value of zero will result in a sample value of zero. Note that the
+     * actual range of samples values is -1.0F to 1.0F, so the actual volume multiplier will be within that range
      */
     private fun applyVolume(actualSample: Float, volume: Int): Float {
         if (volume == 64) {
@@ -194,7 +207,7 @@ class ChannelAudioGenerator(
     }
 
     /**
-     * Accepts a sample byte and responds with a pair of bytes adjusted for stereo panning
+     * Accepts a sample float and responds with a pair of floats adjusted for stereo panning
      *
      * Protracker panning is very simple: it's either left channel or right channel. All we need to do is respond with the
      * sample in the pair's first field for left panning, or second field for right panning.
@@ -202,26 +215,38 @@ class ChannelAudioGenerator(
     private fun getStereoSample(sample: Float): Pair<Float, Float> =
         if (PanningPosition.LEFT == this.panningPosition) Pair(sample, 0.0F) else Pair(0.0F, sample)
 
-    private fun applyVolumeSlideAdjustment(xValue: Int, yValue: Int, volume: Int) =
-        if (xValue > 0) {
-            (xValue + volume).coerceAtMost(64)
+    /**
+     * Apply volume slide effect. Volume increase/decrease are the x/y values of the effect. They cannot both be non-
+     * zero, but this function assumes that has already been taken care of.
+     */
+    private fun applyVolumeSlideAdjustment(volumeIncrease: Int, volumeDecrease: Int, volume: Int) =
+        if (volumeIncrease > 0) {
+            (volumeIncrease + volume).coerceAtMost(64)
         } else {
-            (volume - yValue).coerceAtLeast(0)
+            (volume - volumeDecrease).coerceAtLeast(0)
         }
 
+    /**
+     * Apply a slide to note effect. If the actual period is at the specified period, do nothing (we have already reached
+     * the desired period). Otherwise, either add or subtract the period shift (depending on where the actual period is
+     * relative to the specified period), making sure we do not exceed the specified period.
+     */
     private fun applySlideToNoteAdjustment() {
         if (this.actualPeriod == this.specifiedPeriod) return
 
-        val periodShift = this.slideToNotePeriodShift
         if (this.actualPeriod > this.specifiedPeriod) {
-            this.actualPeriod = (this.actualPeriod - periodShift).coerceAtLeast(this.specifiedPeriod)
+            this.actualPeriod = (this.actualPeriod - this.slideToNotePeriodShift).coerceAtLeast(this.specifiedPeriod)
         } else if (this.actualPeriod < this.specifiedPeriod) {
-            this.actualPeriod = (this.actualPeriod + periodShift).coerceAtMost(this.specifiedPeriod)
+            this.actualPeriod = (this.actualPeriod + this.slideToNotePeriodShift).coerceAtMost(this.specifiedPeriod)
         }
 
         resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE, this.fineTune)
     }
 
+    /**
+     * When a new effect is given, update the effect. In some cases, we want to set some state variables because we may
+     * need to "remember" the effect parameters later.
+     */
     private fun updateEffect(effectType: EffectType, xValue: Int, yValue: Int) {
         when (effectType) {
             EffectType.SLIDE_TO_NOTE -> {
@@ -239,6 +264,12 @@ class ChannelAudioGenerator(
         this.effectYValue = yValue
     }
 
+    /**
+     * Vibrato is tracked separately from other effects because it is "special" - it is not neatly applied at the start
+     * of a tick or the start of a row like other effects. Instead, we keep track of the vibrato state continuously as
+     * we generate samples. So, when a vibrato effect is given, set the variables we need, and remember the past values
+     * if we are meant to continue with a currently active vibrato
+     */
     private fun updateVibratoState(xValue: Int, yValue: Int, continueActiveVibrato: Boolean) {
         this.vibratoSamplesElapsed = if (continueActiveVibrato) this.vibratoSamplesElapsed else 0
 
@@ -251,9 +282,11 @@ class ChannelAudioGenerator(
         this.vibratoSamplesPerCyclePosition = this.vibratoSamplesPerCycle / 64
     }
 
+    // When a slide to note effect is given, return the new value, or the old value when the params are 0 and 0
     private fun getSlideToNotePeriodShift(xValue: Int, yValue: Int): Int =
         if (xValue == 0 && yValue == 0) this.slideToNotePeriodShift else xValue * 16 + yValue
 
+    // If there is an active vibrato effect, calculate by how much the active note's pitch needs to be adjusted
     private fun getVibratoPeriodAdjustment(): Int {
         if (this.currentEffect != EffectType.VIBRATO) {
             return 0
@@ -264,6 +297,8 @@ class ChannelAudioGenerator(
         return sineTableValue * this.vibratoDepth / 128
     }
 
+    // Recalculate how many samples have elapsed in the vibrato effect. If we have exceeded the number of samples per
+    // vibrato cycle, return to zero.
     private fun getUpdatedVibratoSamplesElapsed(): Int {
         return if (this.vibratoSamplesElapsed + 1 >= this.vibratoSamplesPerCycle)
             0

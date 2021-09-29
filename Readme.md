@@ -61,11 +61,13 @@ The AudioPlayer class is the smallest: All it does is accept a ByteArray of samp
 
 ### Resampling algorithm
 
+_**Semantic disclaimer:** Because the word "sample" has more than one meaning in this context, I chose to only use sample to refer to the individual numbers within a PCM audio stream or collection. "Sample" is typically also used to refer to the individual instruments within a module, but in this documentation and in my code, I either refer to them as "instruments" or "audio data."_
+
 The heart of any mod player is in the resampling algorithm, as it is required to be able to play the instrument audio data at varying pitches.
 
 The audio data for the instruments is a simple collection of signed bytes. All Protracker audio data is 8-bit. A note command in a Protracker mod has several pieces of information, including the period and the instrument number. The instrument number is simply used to determine the correct audio data to play. The period tells us at what pitch we should play it. From this information, we should be able to derive how to resample the audio data.
 
-_**Semantic disclaimer:** Because the word "sample" has more than one meaning in this context, I chose to only use sample to refer to the individual numbers within a PCM audio stream or collection. "Sample" is typically also used to refer to the individual instruments within a module, but in this documentation and in my code, I either refer to them as "instruments" or "audio data."_
+In my implementation, I convert all the sample data for the instruments into floating point and keep the values within a range if -1.0 to 1.0. All the resampling is done in floating point. I convert it to a signed short (16-bit) before sending it to audio output - in some sound systems this is not necessary and can be left as floating point, but in my implementation it's needed because the Java audio system doesn't allow me to select PCM_FLOAT encoding.
 
 #### What is Interpolation?
 

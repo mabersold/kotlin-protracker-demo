@@ -14,5 +14,6 @@ enum class EffectType {
     FINE_VOLUME_SLIDE_DOWN,
     CHANGE_SPEED,
     SET_FINE_TUNE,
+    POSITION_JUMP,
     UNKNOWN_EFFECT
 }
