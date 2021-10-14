@@ -119,7 +119,7 @@ class ProTrackerLoader {
 
     private fun getRow(bufferData: ByteArray): Row {
         val instrumentNumber = bufferData[0].toInt().and(240) + bufferData[2].toInt().and(240).shr(4)
-        val period = bufferData[0].toInt().and(15).shl(8).or(bufferData[1].toInt().and(255)).toFloat()
+        val pitch = bufferData[0].toInt().and(15).shl(8).or(bufferData[1].toInt().and(255)).toFloat()
         val effect = bufferData[2].toInt().and(15).shl(8).or(bufferData[3].toInt().and(255))
 
         val effectNumber = effect.and(3840).shr(8)
@@ -154,7 +154,7 @@ class ProTrackerLoader {
             15 -> EffectType.CHANGE_SPEED
             else -> EffectType.UNKNOWN_EFFECT
         }
-        return Row(instrumentNumber, period, effectType, xValue, yValue)
+        return Row(instrumentNumber, pitch, effectType, xValue, yValue)
     }
 
     private fun signedNibble(data: Byte): Int {

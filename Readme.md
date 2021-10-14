@@ -65,7 +65,7 @@ _**Semantic disclaimer:** Because the word "sample" has more than one meaning in
 
 The heart of any mod player is in the resampling algorithm, as it is required to be able to play the instrument audio data at varying pitches.
 
-The audio data for the instruments is a simple collection of signed bytes. All Protracker audio data is 8-bit. A note command in a Protracker mod has several pieces of information, including the period and the instrument number. The instrument number is simply used to determine the correct audio data to play. The period tells us at what pitch we should play it. From this information, we should be able to derive how to resample the audio data.
+The audio data for the instruments is a simple collection of signed bytes. All Protracker audio data is 8-bit. A note command in a Protracker mod has several pieces of information, including the pitch and the instrument number. The instrument number is simply used to determine the correct audio data to play. The pitch tells us how we should modify the waveform's period for playback. From this information, we should be able to derive how to resample the audio data.
 
 In my implementation, I convert all the sample data for the instruments into floating point and keep the values within a range if -1.0 to 1.0. All the resampling is done in floating point. I convert it to a signed short (16-bit) before sending it to audio output - in some sound systems this is not necessary and can be left as floating point, but in my implementation it's needed because the Java audio system doesn't allow me to select PCM_FLOAT encoding.
 
@@ -85,9 +85,9 @@ But a better algorithm might do linear interpolation:
 
 #### My implementation
 
-My algorithm aims to do linear interpolation. Here's how it works. First, we perform a calculation to determine the number of samples per second for a given period with the following formula:
+My algorithm aims to do linear interpolation. Here's how it works. First, we perform a calculation to determine the number of samples per second for a given pitch with the following formula:
 
-    samplesPerSecond = 7093789.2 / (period * 2)
+    samplesPerSecond = 7093789.2 / (pitch * 2)
 
 _(7093789.2 is the clock rate of a PAL Amiga computer - we could also implement this with the NTSC clock rate, which I could include as an option later)_
 

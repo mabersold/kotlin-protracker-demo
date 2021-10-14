@@ -3,7 +3,6 @@ package pcm
 import model.Constants.INSTRUMENT_STARTING_REFERENCE
 import model.Instrument
 import kotlin.math.floor
-import kotlin.math.pow
 
 /**
  * Used to calculate a sample from the given instrument data. Contains the following fields:
@@ -66,8 +65,8 @@ class Resampler {
      * Recalculates the step: Since the step is the key for determining the pitch, whenever the pitch changes, we will
      * need to recalculate the step.
      */
-    fun recalculateStep(period: Float, samplingRate: Float) {
-        this.step = (PAL_CLOCK_RATE / (period * 2)) / samplingRate
+    fun recalculateStep(pitch: Float, samplingRate: Float) {
+        this.step = (PAL_CLOCK_RATE / (pitch * 2)) / samplingRate
     }
 
     /**

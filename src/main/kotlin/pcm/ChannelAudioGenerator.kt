@@ -27,8 +27,8 @@ class ChannelAudioGenerator(
     private lateinit var activeInstrument: Instrument
 
     // Note state variables
-    private var actualPeriod: Float = 0.0F
-    private var specifiedPeriod: Float = 0.0F
+    private var actualPitch: Float = 0.0F
+    private var specifiedPitch: Float = 0.0F
     private var isInstrumentPlaying: Boolean = false
     private var fineTune: Int = 0
 
@@ -39,7 +39,7 @@ class ChannelAudioGenerator(
     private var effectYValue: Int = 0
 
     // State variables for specific effect types
-    private var slideToNotePeriodShift: Int = 0
+    private var slideToNotePitchShift: Int = 0
     private var vibratoCyclesPerRow: Float = 0.0F
     private var vibratoDepth: Int = 0
     private var vibratoSamplesPerCyclePosition: Float = 0.0F
@@ -63,9 +63,9 @@ class ChannelAudioGenerator(
             return Pair(0.0F, 0.0F)
         }
 
-        val vibratoPeriodAdjustment = getVibratoPeriodAdjustment()
-        if (vibratoPeriodAdjustment != 0 && this.actualPeriod != this.specifiedPeriod + vibratoPeriodAdjustment) {
-            this.resampler.recalculateStep(this.actualPeriod + vibratoPeriodAdjustment, SAMPLING_RATE)
+        val vibratoPitchAdjustment = getVibratoPitchAdjustment()
+        if (vibratoPitchAdjustment != 0 && this.actualPitch != this.specifiedPitch + vibratoPitchAdjustment) {
+            this.resampler.recalculateStep(this.actualPitch + vibratoPitchAdjustment, SAMPLING_RATE)
         }
 
         val actualSample = this.resampler.getInterpolatedSample()
@@ -80,11 +80,11 @@ class ChannelAudioGenerator(
     }
 
     /**
-     * Handles new row data during playback - when a new row is provided, it updates the instrument, period, and effect
+     * Handles new row data during playback - when a new row is provided, it updates the instrument, pitch, and effect
      */
     fun setRowData(row: Row, instruments: List<Instrument>) {
         updateInstrument(row, instruments)
-        updatePeriod(row)
+        updatePitch(row)
         updateEffect(row.effect, row.effectXValue, row.effectYValue)
     }
 
@@ -116,7 +116,7 @@ class ChannelAudioGenerator(
         }
 
         applyVolumeAdjustmentEffect()
-        applyPeriodAdjustmentEffect(tickPosition)
+        applyPitchAdjustmentEffect(tickPosition)
     }
 
     private fun applyVolumeAdjustmentEffect() {
@@ -129,24 +129,24 @@ class ChannelAudioGenerator(
         }
     }
 
-    private fun applyPeriodAdjustmentEffect(tickPosition: Int) {
+    private fun applyPitchAdjustmentEffect(tickPosition: Int) {
         when(this.currentEffect) {
             EffectType.SLIDE_TO_NOTE, EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE -> applySlideToNoteAdjustment()
             EffectType.PITCH_SLIDE_UP, EffectType.PITCH_SLIDE_DOWN -> {
-                this.actualPeriod = getPitchSlideAdjustment(this.effectXValue, this.effectYValue, this.currentEffect, this.actualPeriod)
-                this.specifiedPeriod = this.actualPeriod
-                this.resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
+                this.actualPitch = getPitchSlideAdjustment(this.effectXValue, this.effectYValue, this.currentEffect, this.actualPitch)
+                this.specifiedPitch = this.actualPitch
+                this.resampler.recalculateStep(this.actualPitch, SAMPLING_RATE)
             }
             EffectType.ARPEGGIO -> {
-                //get the new period based on our tick position
+                //get the new pitch based on our tick position
                 val numberOfSemitones = when (tickPosition % 3) {
                     1 -> this.effectXValue
                     2 -> this.effectYValue
                     else -> 0
                 }
-                // calculate the period adjustment, factoring in number of semitones - each semitone is the equivalent of 8 finetunes
-                this.actualPeriod = getFineTuneAdjustedPeriod(this.specifiedPeriod, 8 * numberOfSemitones)
-                this.resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
+                // calculate the pitch adjustment, factoring in number of semitones - each semitone is the equivalent of 8 finetunes
+                this.actualPitch = getFineTuneAdjustedPitch(this.specifiedPitch, 8 * numberOfSemitones)
+                this.resampler.recalculateStep(this.actualPitch, SAMPLING_RATE)
             }
             else -> return
         }
@@ -171,7 +171,7 @@ class ChannelAudioGenerator(
 
             // In rare circumstances, an instrument number might be provided without an accompanying note - if this is
             // a different instrument than the one currently playing, stop playing it.
-            if (row.period == 0.0F) {
+            if (row.pitch == 0.0F) {
                 this.isInstrumentPlaying = false
             }
 
@@ -181,33 +181,32 @@ class ChannelAudioGenerator(
             }
         }
 
-        // Specifying instrument number always updates the volume, even if no period is specified
+        // Specifying instrument number always updates the volume, even if no pitch is specified
         this.currentVolume = this.activeInstrument.volume
     }
 
     /**
-     * Updates the period (aka the note, or pitch) to the period of the given row. Immediately change the period to the
-     * given row's period, unless a slide to note effect is specified.
+     * Changes the pitch to the pitch of the given row. Immediately change the pitch to the
+     * given row's pitch, unless a slide to note effect is specified.
      */
-    private fun updatePeriod(row: Row) {
-        if (row.period == 0.0F) {
+    private fun updatePitch(row: Row) {
+        if (row.pitch == 0.0F) {
             return
         }
 
         this.fineTune = getFineTuneValue(this.activeInstrument, row)
-        val fineTuneAdjustedPeriod = getFineTuneAdjustedPeriod(row.period, this.fineTune)
+        val fineTuneAdjustedPitch = getFineTuneAdjustedPitch(row.pitch, this.fineTune)
 
-        // if the new row has a note indicated, we need to change the active period to the new active period and reset the instrument sampling position
-        this.specifiedPeriod = fineTuneAdjustedPeriod
+        this.specifiedPitch = fineTuneAdjustedPitch
 
-        //a slide to note effect will not reset the position of the audio data reference or cause us to immediately change the period
+        //a slide to note effect will not reset the position of the audio data reference or cause us to immediately change the pitch
         if (!listOf(EffectType.SLIDE_TO_NOTE, EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE).contains(row.effect)) {
-            this.actualPeriod = fineTuneAdjustedPeriod
+            this.actualPitch = fineTuneAdjustedPitch
             resampler.audioDataReference = INSTRUMENT_STARTING_REFERENCE
         }
 
         this.isInstrumentPlaying = true
-        this.resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
+        this.resampler.recalculateStep(this.actualPitch, SAMPLING_RATE)
     }
 
     /**
@@ -245,20 +244,20 @@ class ChannelAudioGenerator(
         }
 
     /**
-     * Apply a slide to note effect. If the actual period is at the specified period, do nothing (we have already reached
-     * the desired period). Otherwise, either add or subtract the period shift (depending on where the actual period is
-     * relative to the specified period), making sure we do not exceed the specified period.
+     * Apply a slide to note effect. If the actual pitch is at the specified pitch, do nothing (we have already reached
+     * the desired pitch). Otherwise, either add or subtract the pitch shift (depending on where the actual pitch is
+     * relative to the specified pitch), making sure we do not exceed the specified pitch.
      */
     private fun applySlideToNoteAdjustment() {
-        if (this.actualPeriod == this.specifiedPeriod) return
+        if (this.actualPitch == this.specifiedPitch) return
 
-        if (this.actualPeriod > this.specifiedPeriod) {
-            this.actualPeriod = (this.actualPeriod - this.slideToNotePeriodShift).coerceAtLeast(this.specifiedPeriod)
-        } else if (this.actualPeriod < this.specifiedPeriod) {
-            this.actualPeriod = (this.actualPeriod + this.slideToNotePeriodShift).coerceAtMost(this.specifiedPeriod)
+        if (this.actualPitch > this.specifiedPitch) {
+            this.actualPitch = (this.actualPitch - this.slideToNotePitchShift).coerceAtLeast(this.specifiedPitch)
+        } else if (this.actualPitch < this.specifiedPitch) {
+            this.actualPitch = (this.actualPitch + this.slideToNotePitchShift).coerceAtMost(this.specifiedPitch)
         }
 
-        resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
+        resampler.recalculateStep(this.actualPitch, SAMPLING_RATE)
     }
 
     /**
@@ -268,16 +267,16 @@ class ChannelAudioGenerator(
     private fun updateEffect(effectType: EffectType, xValue: Int, yValue: Int) {
         when (effectType) {
             EffectType.SLIDE_TO_NOTE -> {
-                this.slideToNotePeriodShift = getSlideToNotePeriodShift(xValue, yValue)
+                this.slideToNotePitchShift = getSlideToNotePitchShift(xValue, yValue)
             }
             EffectType.VIBRATO -> {
                 val continueActiveVibrato = this.currentEffect == effectType
                 updateVibratoState(xValue, yValue, continueActiveVibrato)
             }
             else -> {
-                // When there is no effect, make sure to recalculate to the correct actual period so that a vibrato
+                // When there is no effect, make sure to recalculate to the correct actual pitch so that a vibrato
                 // effect does not leave the pitch in a bad state
-                this.resampler.recalculateStep(this.actualPeriod, SAMPLING_RATE)
+                this.resampler.recalculateStep(this.actualPitch, SAMPLING_RATE)
             }
         }
 
@@ -305,11 +304,11 @@ class ChannelAudioGenerator(
     }
 
     // When a slide to note effect is given, return the new value, or the old value when the params are 0 and 0
-    private fun getSlideToNotePeriodShift(xValue: Int, yValue: Int): Int =
-        if (xValue == 0 && yValue == 0) this.slideToNotePeriodShift else xValue * 16 + yValue
+    private fun getSlideToNotePitchShift(xValue: Int, yValue: Int): Int =
+        if (xValue == 0 && yValue == 0) this.slideToNotePitchShift else xValue * 16 + yValue
 
     // If there is an active vibrato effect, calculate by how much the active note's pitch needs to be adjusted
-    private fun getVibratoPeriodAdjustment(): Int {
+    private fun getVibratoPitchAdjustment(): Int {
         if (this.currentEffect != EffectType.VIBRATO) {
             return 0
         }
@@ -342,18 +341,18 @@ class ChannelAudioGenerator(
     }
 
     /**
-     * Each fine tune value represents 1/8th of a semitone - simply divide the period by the triamu ratio raised to
+     * Each fine tune value represents 1/8th of a semitone - simply divide the pitch by the triamu ratio raised to
      * the power of the number of finetunes (positive or negative).
      */
-    private fun getFineTuneAdjustedPeriod(period: Float, fineTune: Int): Float =
-        if (fineTune == 0) period else period / TRIAMU_RATIO.pow(fineTune)
+    private fun getFineTuneAdjustedPitch(pitch: Float, fineTune: Int): Float =
+        if (fineTune == 0) pitch else pitch / TRIAMU_RATIO.pow(fineTune)
 
-    private fun getPitchSlideAdjustment(xValue: Int, yValue: Int, effectType: EffectType, actualPeriod: Float): Float {
-        val periodAdjustment = xValue * 16 + yValue
+    private fun getPitchSlideAdjustment(xValue: Int, yValue: Int, effectType: EffectType, actualPitch: Float): Float {
+        val pitchAdjustment = xValue * 16 + yValue
         return when (effectType) {
-            EffectType.PITCH_SLIDE_UP -> (actualPeriod - periodAdjustment).coerceAtLeast(113.0F)
-            EffectType.PITCH_SLIDE_DOWN -> (actualPeriod + periodAdjustment).coerceAtMost(856.0F)
-            else -> actualPeriod
+            EffectType.PITCH_SLIDE_UP -> (actualPitch - pitchAdjustment).coerceAtLeast(113.0F)
+            EffectType.PITCH_SLIDE_DOWN -> (actualPitch + pitchAdjustment).coerceAtMost(856.0F)
+            else -> actualPitch
         }
     }
 }
