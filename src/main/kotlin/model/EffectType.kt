@@ -1,6 +1,8 @@
 package model
 
 enum class EffectType {
+    NONE,
+    ARPEGGIO,
     PITCH_SLIDE_UP,
     PITCH_SLIDE_DOWN,
     SLIDE_TO_NOTE,

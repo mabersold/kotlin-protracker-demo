@@ -18,7 +18,6 @@ import kotlin.math.pow
 class Resampler {
     companion object {
         private const val PAL_CLOCK_RATE = 7093789.2F
-        private const val TRIAMU_RATIO = 1.007246412F
     }
 
     var audioDataReference: Float = INSTRUMENT_STARTING_REFERENCE
@@ -67,8 +66,8 @@ class Resampler {
      * Recalculates the step: Since the step is the key for determining the pitch, whenever the pitch changes, we will
      * need to recalculate the step.
      */
-    fun recalculateStep(period: Int, samplingRate: Float, fineTune: Int = 0) {
-        this.step = (PAL_CLOCK_RATE / (period * 2)) * fineTuneAdjustment(fineTune) / samplingRate
+    fun recalculateStep(period: Float, samplingRate: Float) {
+        this.step = (PAL_CLOCK_RATE / (period * 2)) / samplingRate
     }
 
     /**
@@ -106,13 +105,5 @@ class Resampler {
         }
 
         return newReference
-    }
-
-    private fun fineTuneAdjustment(fineTune: Int): Float {
-        if (fineTune == 0) {
-            return 1.0F
-        }
-
-        return TRIAMU_RATIO.pow(fineTune)
     }
 }

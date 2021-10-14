@@ -162,7 +162,7 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
 
         this.channelAudioGenerators.forEachIndexed { i, generator ->
             if (currentChannelIsPlaying(i)) {
-                generator.applyPerTickEffects()
+                generator.applyPerTickEffects(this.tickPosition)
             }
         }
     }
@@ -178,12 +178,10 @@ class AudioGenerator(private val module: ProTrackerModule, replacementOrderList:
     }
 
     /**
-     * Determines whether the current position is the start of a new tick. Note that this will return false on tick 0
-     * of a new row - this is important for applying per-tick effects, which are typically not applied during the first
-     * tick.
+     * Determines whether the current position is the start of a new tick
      */
     private fun isStartOfNewTick(): Boolean =
-        songStillActive() && this.samplePosition == 0 && this.tickPosition != 0
+        songStillActive() && this.samplePosition == 0
 
     /**
      * Determines whether the current position is the start of a new row.

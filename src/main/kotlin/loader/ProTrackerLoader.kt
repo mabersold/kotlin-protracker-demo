@@ -119,13 +119,20 @@ class ProTrackerLoader {
 
     private fun getRow(bufferData: ByteArray): Row {
         val instrumentNumber = bufferData[0].toInt().and(240) + bufferData[2].toInt().and(240).shr(4)
-        val period = bufferData[0].toInt().and(15).shl(8).or(bufferData[1].toInt().and(255))
+        val period = bufferData[0].toInt().and(15).shl(8).or(bufferData[1].toInt().and(255)).toFloat()
         val effect = bufferData[2].toInt().and(15).shl(8).or(bufferData[3].toInt().and(255))
 
         val effectNumber = effect.and(3840).shr(8)
         val xValue = effect.and(240).shr(4)
         val yValue = effect.and(15)
         val effectType = when(effectNumber) {
+            0 -> {
+                if (xValue == 0 && yValue == 0) {
+                    EffectType.NONE
+                } else {
+                    EffectType.ARPEGGIO
+                }
+            }
             1 -> EffectType.PITCH_SLIDE_UP
             2 -> EffectType.PITCH_SLIDE_DOWN
             3 -> EffectType.SLIDE_TO_NOTE
