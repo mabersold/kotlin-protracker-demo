@@ -72,7 +72,7 @@ class ChannelAudioGenerator(
 
         val volumeAdjustedSample = getSampleWithVolumeApplied(actualSample, this.currentVolume)
 
-        if (this.currentEffect == EffectType.VIBRATO) {
+        if (listOf(EffectType.VIBRATO, EffectType.VIBRATO_WITH_VOLUME_SLIDE).contains(this.currentEffect)) {
             this.vibratoSamplesElapsed = getUpdatedVibratoSamplesElapsed()
         }
 
@@ -124,7 +124,7 @@ class ChannelAudioGenerator(
             EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE -> {
                 applyVolumeSlide(this.effectXValue, this.effectYValue, this.currentVolume)
             }
-            EffectType.VOLUME_SLIDE -> applyVolumeSlide(this.effectXValue, this.effectYValue, this.currentVolume)
+            EffectType.VOLUME_SLIDE, EffectType.VIBRATO_WITH_VOLUME_SLIDE -> applyVolumeSlide(this.effectXValue, this.effectYValue, this.currentVolume)
             else -> this.currentVolume
         }
     }
@@ -269,9 +269,9 @@ class ChannelAudioGenerator(
             EffectType.SLIDE_TO_NOTE -> {
                 this.slideToNotePitchShift = getSlideToNotePitchShift(xValue, yValue)
             }
-            EffectType.VIBRATO -> {
-                val continueActiveVibrato = this.currentEffect == effectType
-                updateVibratoState(xValue, yValue, continueActiveVibrato)
+            EffectType.VIBRATO, EffectType.VIBRATO_WITH_VOLUME_SLIDE -> {
+                val continueActiveVibrato = listOf(EffectType.VIBRATO, EffectType.VIBRATO_WITH_VOLUME_SLIDE).contains(effectType)
+                updateVibratoState(xValue, yValue, continueActiveVibrato, effectType)
             }
             else -> {
                 // When there is no effect, make sure to recalculate to the correct actual pitch so that a vibrato
@@ -291,11 +291,14 @@ class ChannelAudioGenerator(
      * we generate samples. So, when a vibrato effect is given, set the variables we need, and remember the past values
      * if we are meant to continue with a currently active vibrato
      */
-    private fun updateVibratoState(xValue: Int, yValue: Int, continueActiveVibrato: Boolean) {
+    private fun updateVibratoState(xValue: Int, yValue: Int, continueActiveVibrato: Boolean, effectType: EffectType) {
         this.vibratoSamplesElapsed = if (continueActiveVibrato) this.vibratoSamplesElapsed else 0
 
-        this.vibratoCyclesPerRow = if (xValue == 0) this.vibratoCyclesPerRow else xValue * this.ticksPerRow / 64.0F
-        this.vibratoDepth = if (yValue == 0) this.vibratoDepth else yValue
+        // Only set these values for a vibrato effect, vibrato+volume slide parameters are used for volume slide only
+        if (effectType == EffectType.VIBRATO) {
+            this.vibratoCyclesPerRow = if (xValue == 0) this.vibratoCyclesPerRow else xValue * this.ticksPerRow / 64.0F
+            this.vibratoDepth = if (yValue == 0) this.vibratoDepth else yValue
+        }
 
         val samplesPerRow = (SAMPLING_RATE / (beatsPerMinute / 60.0F)) / 4
 
@@ -309,7 +312,7 @@ class ChannelAudioGenerator(
 
     // If there is an active vibrato effect, calculate by how much the active note's pitch needs to be adjusted
     private fun getVibratoPitchAdjustment(): Int {
-        if (this.currentEffect != EffectType.VIBRATO) {
+        if (!listOf(EffectType.VIBRATO, EffectType.VIBRATO_WITH_VOLUME_SLIDE).contains(this.currentEffect)) {
             return 0
         }
 

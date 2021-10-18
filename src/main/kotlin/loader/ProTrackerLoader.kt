@@ -138,6 +138,7 @@ class ProTrackerLoader {
             3 -> EffectType.SLIDE_TO_NOTE
             4 -> EffectType.VIBRATO
             5 -> EffectType.SLIDE_TO_NOTE_WITH_VOLUME_SLIDE
+            6 -> EffectType.VIBRATO_WITH_VOLUME_SLIDE
             9 -> EffectType.INSTRUMENT_OFFSET
             10 -> EffectType.VOLUME_SLIDE
             11 -> EffectType.POSITION_JUMP
