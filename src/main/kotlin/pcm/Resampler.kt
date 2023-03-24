@@ -16,7 +16,7 @@ import kotlin.math.floor
  */
 class Resampler {
     companion object {
-        private const val PAL_CLOCK_RATE = 7093789.2F
+        const val PAL_CLOCK_RATE = 7093789.2F
     }
 
     var audioDataReference: Float = INSTRUMENT_STARTING_REFERENCE
@@ -69,6 +69,44 @@ class Resampler {
         this.step = (PAL_CLOCK_RATE / (pitch * 2)) / samplingRate
     }
 
+    fun resample(audioData: List<Float>, currentRate: Float, targetRate: Float, antiAliasingEnabled: Boolean = true): List<Float> {
+        val conversionRatio = currentRate / targetRate
+
+        val lengthOfResampledSignal = floor(audioData.size * conversionRatio).toInt()
+
+        val resampledAudioData = arrayListOf<Float>()
+
+        val filterRate = if (currentRate < targetRate) targetRate else currentRate
+        val lowPassFilter = LowPassFilter(filterRate / 2f, filterRate)
+
+        for (indexOfNewSample in 0 until lengthOfResampledSignal) {
+            // Compute the index of the nearest original sample below
+            val indexBelow = floor(indexOfNewSample / conversionRatio).toInt()
+
+            // Index of the nearest original sample above
+            val indexAbove = (indexBelow + 1).coerceAtMost(audioData.size - 1)
+
+            val delta = indexOfNewSample / conversionRatio - indexBelow
+
+            val resampledValue = audioData.getResampledValue(indexBelow, indexAbove, delta)
+                .applyAntiAliasing(antiAliasingEnabled, lowPassFilter)
+
+            resampledAudioData.add(resampledValue)
+        }
+
+        return resampledAudioData
+    }
+
+    private fun List<Float>.getResampledValue(indexBelow: Int, indexAbove: Int, delta: Float) =
+        (1 - delta) * this[indexBelow] + delta * this[indexAbove]
+
+    private fun Float.applyAntiAliasing(antiAliasingEnabled: Boolean, lowPassFilter: LowPassFilter) =
+        if (antiAliasingEnabled) {
+            lowPassFilter.filter(this)
+        } else {
+            this
+        }
+
     /**
      * Returns the next sample in the original audio data. If we are at the end of the audio data array, either return 0
      * for an unlooped instrument, or return whatever is at the repeat offset for a looped instrument.
@@ -106,3 +144,4 @@ class Resampler {
         return newReference
     }
 }
+
